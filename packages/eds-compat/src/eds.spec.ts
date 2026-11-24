@@ -6,6 +6,18 @@ import { applyAutoBlocks, renderPageHtml, renderPlainMain } from './index.js';
 
 const context = { siteKey: 'revista', publicBaseUrl: 'http://127.0.0.1:3000', runtime: 'tscms' as const };
 
+describe('basePath no HTML', () => {
+  it('prefixa assets e feed quando basePath está definido', () => {
+    const document = emptyDocument({ id: 'home', type: 'page', title: 'Home' });
+    document.metadata = { title: 'Home', language: 'pt-BR' };
+    const html = renderPageHtml(document, { ...context, basePath: '/12pontos' });
+    expect(html).toContain('href="/12pontos/styles/styles.css"');
+    expect(html).toContain('src="/12pontos/scripts/scripts.js"');
+    expect(html).toContain('href="/12pontos/feed.xml"');
+    expect(html).toContain('content="/12pontos/nav"');
+  });
+});
+
 describe('HTML compatível com EDS', () => {
   it('gera default content sem transformar títulos em blocos e escapa HTML', () => {
     const document = emptyDocument({ id: 'pagina', type: 'page', title: 'Minha página' });

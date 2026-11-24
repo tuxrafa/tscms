@@ -30,6 +30,8 @@ import { DatabaseService } from './database.service.js';
 const pageWriteSchema = z.object({
   title: z.string().min(1),
   slug: z.string().optional(),
+  /** Absolute site path (e.g. `/` or `/blog/slug`). When omitted, derived from folder + slug. */
+  path: z.string().regex(/^\/[a-z0-9/-]*$/).optional(),
   locale: z.string().default('pt-BR'),
   folderId: z.string().uuid().nullable().optional(),
   parentId: z.string().uuid().nullable().optional(),
@@ -171,8 +173,8 @@ export class ExperienceService {
   async createPage(user: AuthUser, siteId: string, input: unknown) {
     const site = await this.access.requireSite(user.id, siteId, 'content:write');
     const body = parseInput(pageWriteSchema, input);
-    const slug = slugify(body.slug ?? body.title);
-    const path = await this.pathFor(siteId, body.folderId ?? null, slug);
+    const slug = body.path === '/' ? 'home' : slugify(body.slug ?? body.title);
+    const path = body.path ?? (await this.pathFor(siteId, body.folderId ?? null, slug));
     let template: EditableTemplate | undefined;
     if (body.templateId) {
       const record = await this.mustTemplate(siteId, body.templateId);
