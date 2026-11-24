@@ -53,7 +53,10 @@ export class DeliveryService {
     }
     const base = { id: page.id, path: page.path, locale: page.locale, revisionId: revision.id, document: composed.document };
     if (format === 'json') return base;
-    const html = format === 'plain' ? renderPlainMain(composed.document, this.renderContext(site.key)) : renderPageHtml(composed.document, this.renderContext(site.key));
+    const config = (site.config ?? {}) as Record<string, unknown>;
+    const html = format === 'plain'
+      ? renderPlainMain(composed.document, this.renderContext(site.key, config))
+      : renderPageHtml(composed.document, this.renderContext(site.key, config));
     return { ...base, html, etag: this.etag(html) };
   }
 
@@ -247,11 +250,13 @@ export class DeliveryService {
     }
   }
 
-  private renderContext(siteKey: string) {
+  private renderContext(siteKey: string, siteConfig: Record<string, unknown> = {}) {
+    const basePath = typeof siteConfig.basePath === 'string' ? siteConfig.basePath : '';
     return {
       siteKey,
       publicBaseUrl: process.env.PUBLIC_BASE_URL ?? 'http://127.0.0.1:3000',
       runtime: 'tscms' as const,
+      basePath,
     };
   }
 

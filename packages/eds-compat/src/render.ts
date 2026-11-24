@@ -6,7 +6,16 @@ export interface RenderContext {
   siteKey: string;
   publicBaseUrl: string;
   runtime: 'tscms' | 'adobe';
+  /** Public URL prefix for the site (e.g. `/12pontos`). Empty means site root. */
+  basePath?: string;
   eager?: boolean;
+}
+
+function withBasePath(basePath: string | undefined, assetPath: string): string {
+  const prefix = String(basePath || '').replace(/\/+$/, '');
+  if (!prefix) return assetPath;
+  if (!assetPath.startsWith('/')) return `${prefix}/${assetPath}`;
+  return `${prefix}${assetPath}`;
 }
 
 const allowedEmbedHosts = new Set([
@@ -39,13 +48,15 @@ export function renderPageHtml(document: CanonicalDocument, context: RenderConte
   const structured = meta.structuredData
     ? `<script type="application/ld+json">${JSON.stringify(meta.structuredData).replaceAll('<', '\\u003c')}</script>`
     : '';
-  const nav = meta.nav ?? '/nav';
-  const footer = meta.footer ?? '/footer';
+  const nav = withBasePath(context.basePath, meta.nav ?? '/nav');
+  const footer = withBasePath(context.basePath, meta.footer ?? '/footer');
+  const feedHref = withBasePath(context.basePath, '/feed.xml');
+  const stylesHref = withBasePath(context.basePath, '/styles/styles.css');
   const scripts =
     context.runtime === 'adobe'
-      ? `<script src="/scripts/aem.js" type="module"></script><script src="/scripts/scripts.js" type="module"></script>`
-      : `<script src="/scripts/scripts.js" type="module"></script>`;
-  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="/feed.xml"><link rel="stylesheet" href="/styles/styles.css">${structured}${scripts}</head><body><header></header><main>${renderPlainMain(document, context)}</main><footer></footer></body></html>`;
+      ? `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/aem.js'))}" type="module"></script><script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`
+      : `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`;
+  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="${escapeAttr(feedHref)}"><link rel="stylesheet" href="${escapeAttr(stylesHref)}">${structured}${scripts}</head><body><header></header><main>${renderPlainMain(document, context)}</main><footer></footer></body></html>`;
 }
 
 function renderSection(section: SectionNode, context: RenderContext): string {
