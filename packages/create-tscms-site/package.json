@@ -1,0 +1,11 @@
+{
+  "name": "create-tscms-site",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "create-tscms-site": "./src/bin.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

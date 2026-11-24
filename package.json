@@ -1,0 +1,49 @@
+{
+  "name": "tscms",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Plataforma headless de conteúdo e autoria visual. O nome TSCMS é a identidade atual e pode ser renomeado sem mudar a arquitetura.",
+  "type": "module",
+  "packageManager": "pnpm@10.33.4",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:migrate": "tsx packages/database/src/migrate.ts",
+    "db:seed": "node --import @swc-node/register/esm-register apps/api/src/seed.ts",
+    "openapi": "node --import @swc-node/register/esm-register apps/api/src/export-openapi.ts"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@swc/core",
+      "esbuild",
+      "sharp",
+      "msgpackr-extract"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@swc-node/register": "^1.12.1",
+    "@swc/core": "^1.15.3",
+    "@types/node": "^22.19.1",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^16.5.0",
+    "linkedom": "^0.18.12",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.6",
+    "turbo": "^2.6.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.4",
+    "unplugin-swc": "^1.5.9",
+    "vitest": "^3.2.4"
+  }
+}

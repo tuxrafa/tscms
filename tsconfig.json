@@ -1,0 +1,38 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "jsx": "react-jsx",
+    "paths": {
+      "@tscms/content-schema": ["packages/content-schema/src/index.ts"],
+      "@tscms/core-domain": ["packages/core-domain/src/index.ts"],
+      "@tscms/api-contracts": ["packages/api-contracts/src/index.ts"],
+      "@tscms/database": ["packages/database/src/index.ts"],
+      "@tscms/block-registry": ["packages/block-registry/src/index.ts"],
+      "@tscms/template-engine": ["packages/template-engine/src/index.ts"],
+      "@tscms/fragment-resolver": ["packages/fragment-resolver/src/index.ts"],
+      "@tscms/content-composer": ["packages/content-composer/src/index.ts"],
+      "@tscms/publishing": ["packages/publishing/src/index.ts"],
+      "@tscms/media": ["packages/media/src/index.ts"],
+      "@tscms/delivery-sdk": ["packages/delivery-sdk/src/index.ts"],
+      "@tscms/author-sdk": ["packages/author-sdk/src/index.ts"],
+      "@tscms/eds-compat": ["packages/eds-compat/src/index.ts"],
+      "@tscms/eds-runtime": ["packages/eds-runtime/src/index.ts"],
+      "@tscms/renderer-contracts": ["packages/renderer-contracts/src/index.ts"],
+      "@tscms/embed-sdk": ["packages/embed-sdk/src/index.ts"],
+      "@tscms/cli": ["packages/cli/src/index.ts"],
+      "@tscms/ui": ["packages/ui/src/index.ts"]
+    }
+  },
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/src/**/*.tsx",
+    "packages/create-tscms-site/src/**/*.ts",
+    "apps/*/src/**/*.ts",
+    "apps/*/src/**/*.tsx",
+    "examples/**/*.ts",
+    "tests/**/*.ts"
+  ],
+  "exclude": ["**/dist/**", "**/node_modules/**", "starter-kits/**/blocks/**", "examples/company-website/**"]
+}

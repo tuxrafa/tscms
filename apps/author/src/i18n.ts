@@ -1,0 +1,61 @@
+const ptBR = {
+  login: 'Entrar',
+  register: 'Criar conta',
+  email: 'E-mail',
+  password: 'Senha',
+  name: 'Nome',
+  organization: 'Organização',
+  sites: 'Sites',
+  pages: 'Páginas',
+  content: 'Conteúdo',
+  models: 'Modelos',
+  templates: 'Templates',
+  fragments: 'Fragmentos',
+  polls: 'Enquetes',
+  media: 'Mídia',
+  publish: 'Publicar',
+  save: 'Salvar',
+  preview: 'Pré-visualizar',
+  logout: 'Sair',
+  studio: 'Estúdio',
+  columnView: 'Colunas',
+  listView: 'Lista',
+  cardView: 'Cartões',
+  inspector: 'Inspetor',
+  library: 'Biblioteca',
+  canvasNote: 'Este canvas é estrutural. A apresentação final pertence ao site.',
+} as const;
+
+const en = {
+  login: 'Sign in',
+  register: 'Create account',
+  email: 'Email',
+  password: 'Password',
+  name: 'Name',
+  organization: 'Organization',
+  sites: 'Sites',
+  pages: 'Pages',
+  content: 'Content',
+  models: 'Models',
+  templates: 'Templates',
+  fragments: 'Fragments',
+  polls: 'Polls',
+  media: 'Media',
+  publish: 'Publish',
+  save: 'Save',
+  preview: 'Preview',
+  logout: 'Sign out',
+  studio: 'Studio',
+  columnView: 'Columns',
+  listView: 'List',
+  cardView: 'Cards',
+  inspector: 'Inspector',
+  library: 'Library',
+  canvasNote: 'This canvas is structural. The final presentation belongs to the site.',
+} as const;
+
+export type MessageKey = keyof typeof ptBR;
+
+export function t(key: MessageKey, locale: 'pt-BR' | 'en' = 'pt-BR'): string {
+  return locale === 'en' ? en[key] : ptBR[key];
+}

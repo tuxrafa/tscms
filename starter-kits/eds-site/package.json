@@ -1,0 +1,14 @@
+{
+  "name": "tscms-eds-site",
+  "private": true,
+  "type": "module",
+  "description": "Site independente. O design deste diretório não pertence ao CMS.",
+  "scripts": {
+    "tscms:validate": "tscms site validate",
+    "dev": "node scripts/preview.mjs"
+  },
+  "dependencies": {
+    "@tscms/delivery-sdk": "workspace:*",
+    "@tscms/eds-runtime": "workspace:*"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@tscms/publishing",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@tscms/content-schema": "workspace:*",
+    "@tscms/core-domain": "workspace:*",
+    "fast-xml-parser": "^5.3.0"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "name": "@tscms/fragment-resolver",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@tscms/content-schema": "workspace:*"
+  }
+}
