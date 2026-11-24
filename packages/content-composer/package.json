@@ -1,0 +1,14 @@
+{
+  "name": "@tscms/content-composer",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@tscms/block-registry": "workspace:*",
+    "@tscms/content-schema": "workspace:*",
+    "@tscms/fragment-resolver": "workspace:*",
+    "@tscms/template-engine": "workspace:*"
+  }
+}

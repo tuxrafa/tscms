@@ -1,0 +1,6 @@
+:root {
+  --color-text: var(--site-ink);
+  --color-bg: var(--site-paper);
+  --color-accent: var(--site-accent);
+  --space-m: var(--site-space);
+}

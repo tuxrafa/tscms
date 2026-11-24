@@ -1,0 +1,19 @@
+:root {
+  --site-ink: #172033;
+  --site-paper: #f7f4ee;
+  --site-accent: #0f6e8c;
+  --site-space: 1.5rem;
+  --site-font: "Iowan Old Style", Palatino, Georgia, serif;
+}
+
+body {
+  margin: 0;
+  background: var(--site-paper);
+  color: var(--site-ink);
+  font-family: var(--site-font);
+}
+
+main {
+  max-width: 72rem;
+  margin: 0 auto;
+}

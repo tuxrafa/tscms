@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schemas.tscms.local/site-v1.json",
+  "schemaVersion": 1,
+  "siteId": "site-inicial",
+  "name": "Site inicial",
+  "api": {
+    "deliveryBaseUrl": "http://127.0.0.1:3000/v1/delivery"
+  },
+  "renderer": {
+    "type": "eds",
+    "runtime": "tscms",
+    "compatibilityVersion": "1"
+  },
+  "paths": {
+    "blocks": "./blocks",
+    "scripts": "./scripts",
+    "styles": "./styles"
+  },
+  "authoring": {
+    "componentsManifest": "./dist/components.manifest.json"
+  },
+  "locales": ["pt-BR"]
+}

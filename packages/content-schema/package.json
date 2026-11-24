@@ -1,0 +1,13 @@
+{
+  "name": "@tscms/content-schema",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Contratos de conteúdo canônicos, independentes de React e de HTML EDS.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
+  }
+}

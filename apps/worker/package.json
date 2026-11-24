@@ -1,0 +1,15 @@
+{
+  "name": "@tscms/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "start": "tsx src/main.ts"
+  },
+  "dependencies": {
+    "@tscms/publishing": "workspace:*",
+    "bullmq": "^5.63.0",
+    "ioredis": "^5.8.2"
+  }
+}

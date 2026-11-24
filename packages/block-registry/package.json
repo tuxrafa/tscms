@@ -1,0 +1,12 @@
+{
+  "name": "@tscms/block-registry",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@tscms/content-schema": "workspace:*",
+    "zod": "^3.25.76"
+  }
+}

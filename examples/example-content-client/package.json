@@ -1,0 +1,8 @@
+{
+  "name": "@example/content-client",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@tscms/delivery-sdk": "workspace:*"
+  }
+}

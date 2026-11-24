@@ -1,0 +1,6 @@
+@import "../design-system/colors.css";
+
+body {
+  background: var(--company-paper);
+  color: var(--company-ink);
+}

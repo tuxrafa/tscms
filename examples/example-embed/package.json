@@ -1,0 +1,5 @@
+{
+  "name": "@example/embed",
+  "private": true,
+  "description": "Exemplo estático de incorporação por iframe."
+}

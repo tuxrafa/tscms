@@ -1,0 +1,15 @@
+{
+  "name": "@tscms/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "tscms": "./src/bin.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@tscms/block-registry": "workspace:*",
+    "@tscms/content-schema": "workspace:*"
+  }
+}

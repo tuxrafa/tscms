@@ -1,0 +1,4 @@
+.hero {
+  display: grid;
+  gap: var(--space-m, 1.5rem);
+}

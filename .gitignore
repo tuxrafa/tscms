@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+.turbo
+.env
+.env.local
+data
+*.log
+.DS_Store
+playwright-report
+test-results
+blob-report
+*.tsbuildinfo
