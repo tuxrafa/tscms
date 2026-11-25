@@ -214,6 +214,46 @@ describe('fluxo editorial de ponta a ponta', () => {
     expect(listed.json().data.some((item: { id: string; path: string }) => item.id === nested.json().id && item.path === '/blog/artigo-interno')).toBe(true);
     const rootOnly = await inject('GET', `/v1/management/sites/${siteId}/tree`);
     expect(rootOnly.json().pages.some((item: { id: string }) => item.id === nested.json().id)).toBe(false);
+    const folders = await inject('GET', `/v1/management/sites/${siteId}/folders`);
+    expect(folders.json().data.some((item: { id: string; path: string }) => item.id === folder.json().id && item.path === '/blog')).toBe(true);
+    const edited = await inject('PATCH', `/v1/management/sites/${siteId}/pages/${nested.json().id}`, {
+      title: 'Artigo interno',
+      slug: 'artigo-interno',
+      path: '/blog/artigo-interno',
+      locale: 'pt-BR',
+      folderId: folder.json().id,
+      expectedVersion: nested.json().version,
+      document: {
+        ...nested.json().document,
+        metadata: {
+          ...nested.json().document.metadata,
+          description: 'Resumo do artigo',
+          canonical: 'https://revista.example/blog/artigo-interno',
+          robots: 'index,follow',
+          openGraph: { title: 'OG do artigo', image: 'https://revista.example/capa.jpg' },
+        },
+      },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json().document.metadata.description).toBe('Resumo do artigo');
+    expect(edited.json().document.metadata.openGraph.title).toBe('OG do artigo');
+    expect(edited.json().path).toBe('/blog/artigo-interno');
+    const moved = await inject('PATCH', `/v1/management/sites/${siteId}/pages/${nested.json().id}`, {
+      title: 'Artigo interno',
+      slug: 'artigo-movido',
+      path: '/artigo-movido',
+      folderId: null,
+      document: edited.json().document,
+      expectedVersion: edited.json().version,
+    });
+    expect(moved.statusCode).toBe(200);
+    expect(moved.json().path).toBe('/artigo-movido');
+    expect(moved.json().folderId).toBeNull();
+    const invalidSlug = await inject('PATCH', `/v1/management/sites/${siteId}/pages/${nested.json().id}`, {
+      slug: 'Artigo Interno',
+      expectedVersion: moved.json().version,
+    });
+    expect(invalidSlug.statusCode).toBe(400);
     const pagePublished = await inject('POST', `/v1/management/sites/${siteId}/pages/${pageId}/publish`);
     expect(pagePublished.statusCode).toBe(201);
 

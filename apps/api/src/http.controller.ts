@@ -185,6 +185,11 @@ export class ContentController {
     return this.experience.publishTemplate(user, siteId, templateId);
   }
 
+  @Get('sites/:siteId/folders')
+  listFolders(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string) {
+    return this.experience.listFolders(user, siteId);
+  }
+
   @Post('sites/:siteId/folders')
   createFolder(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Body() body: unknown) {
     return this.experience.createFolder(user, siteId, body);
