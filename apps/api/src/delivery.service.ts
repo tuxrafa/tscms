@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, like, sql } from 'drizzle-orm';
 import {
   assets,
   contentEntries,
@@ -58,6 +58,40 @@ export class DeliveryService {
       ? renderPlainMain(composed.document, this.renderContext(site.key, config))
       : renderPageHtml(composed.document, this.renderContext(site.key, config));
     return { ...base, html, etag: this.etag(html) };
+  }
+
+  async publishedPages(siteKey: string, pathPrefix?: string) {
+    if (pathPrefix !== undefined && !/^\/[a-z0-9/-]*$/.test(pathPrefix)) {
+      throw new ApiException(400, 'validation_error', 'O prefixo do caminho é inválido.');
+    }
+    const site = await this.siteByKey(siteKey);
+    const filters = [eq(pages.siteId, site.id), eq(pages.status, 'published'), isNull(pages.deletedAt)];
+    if (pathPrefix) filters.push(like(pages.path, `${pathPrefix}%`));
+    const rows = await this.database.db
+      .select({
+        id: pages.id,
+        title: pages.title,
+        path: pages.path,
+        slug: pages.slug,
+        locale: pages.locale,
+        updatedAt: pages.updatedAt,
+        document: pages.document,
+      })
+      .from(pages)
+      .where(and(...filters))
+      .orderBy(desc(pages.updatedAt));
+    return {
+      data: rows.map((row) => ({
+        id: row.id,
+        title: row.document.metadata.title || row.title,
+        path: row.path,
+        slug: row.slug,
+        locale: row.locale,
+        description: row.document.metadata.description ?? row.document.metadata.openGraph?.description ?? '',
+        image: row.document.metadata.openGraph?.image ?? '',
+        updatedAt: row.updatedAt.toISOString(),
+      })),
+    };
   }
 
   async contentById(siteKey: string, id: string) {
@@ -264,9 +298,14 @@ export class DeliveryService {
     return `"${createHash('sha256').update(body).digest('hex')}"`;
   }
 
-  private async mustSite(siteKey: string) {
+  private async siteByKey(siteKey: string) {
     const [site] = await this.database.db.select().from(sites).where(and(eq(sites.key, siteKey), isNull(sites.deletedAt))).limit(1);
     if (!site) throw new ApiException(404, 'not_found', 'Site não encontrado.');
+    return site;
+  }
+
+  private async mustSite(siteKey: string) {
+    const site = await this.siteByKey(siteKey);
     await this.warmFragments(site.id);
     return site;
   }
