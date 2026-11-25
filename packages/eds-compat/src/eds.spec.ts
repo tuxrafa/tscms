@@ -29,11 +29,39 @@ describe('imagens', () => {
       ],
     };
     const html = renderPlainMain(document, context);
-    expect(html).toContain('<img src="/media/capa.webp" alt="Capa" loading="lazy">');
-    expect(html).toContain('<img src="/media/foto.jpg" alt="Foto" loading="lazy">');
-    expect(html).toContain('<img src="/media/agora.jpg" alt="Agora" loading="eager" fetchpriority="high">');
-    expect(html).toContain('<img src="/media/ja.webp" alt="Já" loading="eager" fetchpriority="high">');
-    expect(html).toContain('<img src="/media/card.webp" alt="Card" loading="eager" fetchpriority="high">');
+    expect(html).toContain('<img src="/media/capa.webp" alt="Capa" loading="lazy"');
+    expect(html).toContain('<img src="/media/foto.jpg" alt="Foto" loading="lazy"');
+    expect(html).toContain('<img src="/media/agora.jpg" alt="Agora" loading="eager" fetchpriority="high"');
+    expect(html).toContain('<img src="/media/ja.webp" alt="Já" loading="eager" fetchpriority="high"');
+    expect(html).toContain('<img src="/media/card.webp" alt="Card" loading="eager" fetchpriority="high"');
+    for (const url of ['/media/capa.webp', '/media/foto.jpg', '/media/card.webp']) {
+      expect(html).toContain(`media="(max-width: 480px)" srcset="${url}"`);
+      expect(html).toContain(`media="(max-width: 768px)" srcset="${url}"`);
+      expect(html).toContain(`media="(max-width: 1200px)" srcset="${url}"`);
+      expect(html).toContain(`media="(min-width: 1201px)" srcset="${url}"`);
+    }
+    expect(html).toContain('asset-picture-shimmer');
+  });
+
+  it('escolhe a rendition pela tela e usa a miniatura como placeholder', () => {
+    const document = emptyDocument({ id: 'hero', type: 'page', title: 'Hero' });
+    document.slots.main?.sections[0]?.children.push({
+      id: 'foto',
+      type: 'defaultContent',
+      element: 'image',
+      data: {
+        alt: 'Capa',
+        src: '/a/large.webp',
+        srcset: '/a/thumbnail.webp 200w, /a/small.webp 480w, /a/medium.webp 768w, /a/large.webp 1200w, /a/xlarge.webp 1920w',
+      },
+    });
+    const html = renderPlainMain(document, context);
+    expect(html).toContain('media="(max-width: 480px)" srcset="/a/small.webp"');
+    expect(html).toContain('media="(max-width: 768px)" srcset="/a/medium.webp"');
+    expect(html).toContain('media="(max-width: 1200px)" srcset="/a/large.webp"');
+    expect(html).toContain('media="(min-width: 1201px)" srcset="/a/xlarge.webp"');
+    expect(html).toContain('<img src="/a/xlarge.webp" alt="Capa" loading="lazy"');
+    expect(html).toContain("--asset-preview:url('/a/thumbnail.webp')");
   });
 });
 

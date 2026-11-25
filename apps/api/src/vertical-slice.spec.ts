@@ -368,7 +368,7 @@ describe('fluxo editorial de ponta a ponta', () => {
     expect((await inject('POST', `/v1/management/sites/${siteId}/pages/${photoPage.json().id}/publish`)).statusCode).toBe(201);
     const photoHtml = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages/by-path?path=/com-foto&format=html` });
     expect(photoHtml.statusCode).toBe(200);
-    expect(photoHtml.body).toContain('<picture>');
+    expect(photoHtml.body).toContain('<picture class="asset-picture">');
     expect(photoHtml.body).toContain(`/v1/delivery/sites/${siteKey}/assets/${assetId}/renditions/thumbnail`);
     expect(photoHtml.body).toContain('srcset=');
     const nextPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64');
