@@ -20,7 +20,7 @@ export async function createApp() {
   await app.register(cors, { origin, credentials: true });
   await app.register(helmet, { contentSecurityPolicy: false });
   await app.register(rateLimit, { global: true, max: 600, timeWindow: '1 minute' });
-  await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } });
+  await app.register(multipart, { limits: { fileSize: 20 * 1024 * 1024 } });
   app.useGlobalFilters(new AllExceptionsFilter());
   const config = new DocumentBuilder()
     .setTitle(product.displayName)

@@ -90,7 +90,7 @@ function renderDefault(element: string, data: Record<string, unknown>): string {
     case 'text':
       return renderRich(data.body);
     case 'image':
-      return `${renderPicture({ src: stringValue(data.src ?? nested(data.asset, 'src') ?? '/media/image.webp'), alt: stringValue(data.alt) }, loadsEager(data))}${data.caption ? `<p>${escapeHtml(stringValue(data.caption))}</p>` : ''}`;
+      return `${renderPicture(pictureFrom(data.assetId ? data.asset ?? data : { src: data.src, alt: data.alt, srcset: data.srcset, asset: data.asset }), loadsEager(data))}${data.caption ? `<p>${escapeHtml(stringValue(data.caption))}</p>` : ''}`;
     case 'button':
       return renderButton(data);
     case 'buttonGroup':
@@ -327,9 +327,16 @@ function keyValues(data: Record<string, unknown>): string {
     .join('');
 }
 
-function pictureFrom(value: unknown): { src: string; alt: string } {
+function pictureFrom(value: unknown): { src: string; alt: string; srcset?: string } {
   if (typeof value === 'string') return { src: value, alt: '' };
-  return { src: stringValue(nested(value, 'src') ?? '/media/image.webp'), alt: stringValue(nested(value, 'alt')) };
+  const nestedAsset = nested(value, 'asset');
+  const source = nested(value, 'src') ? value : nestedAsset ?? value;
+  const srcset = nested(source, 'srcset') ?? nested(value, 'srcset');
+  return {
+    src: stringValue(nested(source, 'src') ?? nested(value, 'src') ?? '/media/image.webp'),
+    alt: stringValue(nested(value, 'alt') ?? nested(source, 'alt')),
+    ...(typeof srcset === 'string' ? { srcset } : {}),
+  };
 }
 
 function stringValue(value: unknown): string {
