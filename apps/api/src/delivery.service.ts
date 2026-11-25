@@ -24,11 +24,15 @@ import { renderPageHtml, renderPlainMain } from '@tscms/eds-compat';
 import { renderRobots, renderRss, renderSitemap, writePublishedFiles, type FeedItem } from '@tscms/publishing';
 import { createHash } from 'node:crypto';
 import { ApiException } from './common.js';
+import { DamService } from './dam.service.js';
 import { DatabaseService } from './database.service.js';
 
 @Injectable()
 export class DeliveryService {
-  constructor(private readonly database: DatabaseService) {}
+  constructor(
+    private readonly database: DatabaseService,
+    private readonly dam: DamService,
+  ) {}
 
   async pageByPath(siteKey: string, path: string, format: 'json' | 'html' | 'plain') {
     const site = await this.mustSite(siteKey);
@@ -47,7 +51,7 @@ export class DeliveryService {
     const [revision] = await this.database.db.select().from(pageRevisions).where(eq(pageRevisions.id, page.publishedRevisionId)).limit(1);
     if (!revision) throw new ApiException(404, 'not_found', 'Revisão publicada não encontrada.');
     const templateDefinition = page.templateId ? await this.publishedTemplate(page.templateId) : undefined;
-    const composed = this.composePage(site.id, revision.document, templateDefinition);
+    const composed = this.composePage(site.id, await this.hydrateAssets(site.key, revision.document), templateDefinition);
     if (composed.issues.length > 0) {
       throw new ApiException(409, 'composition', 'A página publicada não pôde ser composta.', composed.issues.map((message) => ({ path: 'document', message })));
     }
@@ -92,6 +96,38 @@ export class DeliveryService {
         updatedAt: row.updatedAt.toISOString(),
       })),
     };
+  }
+
+  private async hydrateAssets(siteKey: string, document: CanonicalDocument): Promise<CanonicalDocument> {
+    const clone = structuredClone(document);
+    const visit = async (value: unknown): Promise<void> => {
+      if (Array.isArray(value)) {
+        for (const item of value) await visit(item);
+        return;
+      }
+      if (!value || typeof value !== 'object') return;
+      const record = value as Record<string, unknown>;
+      if (typeof record.assetId === 'string') {
+        try {
+          const pinned = record.versionPolicy === 'pinned' && typeof record.version === 'number' ? record.version : undefined;
+          const published = await this.dam.publicAsset(siteKey, record.assetId, pinned);
+          const preferred = published.renditions.large ?? published.renditions.medium ?? published.renditions.small ?? published.renditions.thumbnail;
+          if (preferred) record.src = preferred.url;
+          const srcset = ['thumbnail', 'small', 'medium', 'large', 'xlarge']
+            .map((name) => published.renditions[name])
+            .filter((item): item is NonNullable<typeof item> => Boolean(item))
+            .map((item) => `${item.url} ${item.width}w`)
+            .join(', ');
+          if (srcset) record.srcset = srcset;
+          if (typeof record.alt !== 'string' && published.alt) record.alt = published.alt;
+        } catch {
+          // Uma referência a asset indisponível mantém o endereço já gravado no documento.
+        }
+      }
+      for (const child of Object.values(record)) await visit(child);
+    };
+    await visit(clone);
+    return clone;
   }
 
   async contentById(siteKey: string, id: string) {

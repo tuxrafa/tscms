@@ -16,12 +16,13 @@ export interface PictureInput {
   alt: string;
   width?: number;
   height?: number;
+  srcset?: string;
 }
 
 export function renderPicture(input: PictureInput, eager = false): string {
   const src = escapeAttr(input.src);
   const alt = escapeAttr(input.alt);
-  const webp = src.replace(/\.(jpe?g|png)$/i, '.webp');
+  const webp = input.srcset ? escapeAttr(input.srcset) : src.replace(/\.(jpe?g|png)$/i, '.webp');
   const loading = eager ? 'eager' : 'lazy';
   const fetchPriority = eager ? ' fetchpriority="high"' : '';
   return `<picture><source type="image/webp" srcset="${webp}"><img src="${src}" alt="${alt}" loading="${loading}"${fetchPriority}></picture>`;

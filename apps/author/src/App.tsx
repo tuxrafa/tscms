@@ -22,6 +22,7 @@ import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { t } from './i18n';
 import { canonicalToEditor, editorToCanonical, plainRichText } from './rich-text';
+import { AssetPicker, MediaPage } from './assets';
 import { api, useSession } from './session';
 
 const defaultElements: Record<string, DefaultContentNode['element']> = {
@@ -692,6 +693,7 @@ function PageEditor({ siteId }: { siteId: string }) {
             />
           ) : selectedNode && selectedNode.type !== 'fragmentReference' ? (
             <Inspector
+              siteId={siteId}
               definition={definitionFor(selectedNode)}
               nodeId={selectedNode.id}
               value={selectedNode.data}
@@ -746,11 +748,13 @@ function nodeSummary(node: ContentNode): string {
 }
 
 function Inspector({
+  siteId,
   definition,
   nodeId,
   value,
   onChange,
 }: {
+  siteId: string;
   definition?: ComponentDefinition;
   nodeId: string;
   value: Record<string, unknown>;
@@ -758,8 +762,22 @@ function Inspector({
 }) {
   const richFields = definition?.fields.filter((field) => field.type === 'richtext') ?? [];
   const booleanFields = definition?.fields.filter((field) => field.type === 'boolean') ?? [];
+  const mediaFields = definition?.fields.filter((field) => field.type === 'media') ?? [];
   return (
     <div className="flex flex-col gap-2">
+      {mediaFields.map((field) => (
+        <Field key={field.name} label={field.label ?? field.name}>
+          <AssetPicker
+            siteId={siteId}
+            onSelect={(asset, siteKey) => {
+              const preset = asset.width && asset.width >= 1200 ? 'large' : 'thumbnail';
+              const src = `/v1/delivery/sites/${siteKey}/assets/${asset.id}/renditions/${preset}`;
+              const reference = { assetId: asset.id, src, alt: asset.alt || asset.title, versionPolicy: 'latestPublished' };
+              onChange({ ...value, assetId: asset.id, src, alt: reference.alt, [field.name]: reference });
+            }}
+          />
+        </Field>
+      ))}
       {richFields.map((field) => (
         <RichTextField
           key={`${nodeId}:${field.name}`}
@@ -942,17 +960,3 @@ function PollsPage({ siteId }: { siteId: string }) {
   );
 }
 
-function MediaPage({ siteId }: { siteId: string }) {
-  const token = useSession((state) => state.token);
-  const media = useQuery({ queryKey: ['media', siteId], queryFn: () => api(`/v1/management/sites/${siteId}/media`, { token }) });
-  return (
-    <div>
-      <h1 className="mb-4 text-4xl">Mídia</h1>
-      <ul>
-        {(media.data?.data ?? []).map((asset: { id: string; filename: string }) => (
-          <li key={asset.id}>{asset.filename}</li>
-        ))}
-      </ul>
-    </div>
-  );
-}

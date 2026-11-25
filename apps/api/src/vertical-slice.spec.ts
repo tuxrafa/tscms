@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
@@ -305,6 +305,124 @@ describe('fluxo editorial de ponta a ponta', () => {
     const tree = await inject('GET', `/v1/management/sites/${siteId}/tree`);
     expect(tree.json().pages.some((item: { id: string }) => item.id === pageId)).toBe(true);
 
+    const assetFolder = await inject('POST', `/v1/management/sites/${siteId}/asset-folders`, { name: 'Blog' });
+    expect(assetFolder.statusCode).toBe(201);
+    expect(assetFolder.json().path).toBe('/blog');
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    const uploaded = await upload(png, 'capa.png', assetFolder.json().id);
+    expect(uploaded.statusCode).toBe(201);
+    const assetId = uploaded.json().asset.id as string;
+    expect(uploaded.json().asset.status).toBe('ready');
+    expect(uploaded.json().asset.width).toBe(1);
+    expect(uploaded.json().asset.checksum).toMatch(/^[a-f0-9]{64}$/);
+    await access(`${process.env.MEDIA_ROOT}/${siteId}/${assetId}/v1/original`);
+    const duplicate = await upload(png, 'outra.png', assetFolder.json().id);
+    expect(duplicate.json().duplicate).toBe(true);
+    const svg = await upload(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>'), 'icone.svg');
+    expect(svg.statusCode).toBe(400);
+    const metadata = await inject('PATCH', `/v1/management/sites/${siteId}/assets/${assetId}`, {
+      title: 'Capa do blog',
+      description: 'Imagem de teste',
+      alt: 'Quadrado',
+      focalPoint: { x: 0.5, y: 0.35 },
+    });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.json().focalPoint).toEqual({ x: 0.5, y: 0.35 });
+    expect((await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/assets/${assetId}` })).statusCode).toBe(404);
+    expect((await inject('POST', `/v1/management/sites/${siteId}/assets/${assetId}/publish`)).statusCode).toBe(201);
+    const delivered = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/assets/${assetId}` });
+    expect(delivered.statusCode).toBe(200);
+    expect(delivered.json().renditions.thumbnail.url).toContain('/renditions/thumbnail');
+    const thumbnail = await app.inject({ method: 'GET', url: delivered.json().renditions.thumbnail.url });
+    expect(thumbnail.statusCode).toBe(200);
+    expect(thumbnail.headers['content-type']).toContain('image/webp');
+    const photoPage = await inject('POST', `/v1/management/sites/${siteId}/pages`, {
+      title: 'Com foto',
+      slug: 'com-foto',
+      document: {
+        schemaVersion: 1,
+        id: 'com-foto',
+        type: 'page',
+        locale: 'pt-BR',
+        metadata: { title: 'Com foto', language: 'pt-BR' },
+        slots: {
+          main: {
+            sections: [
+              {
+                id: 'section-main',
+                children: [
+                  {
+                    id: 'foto',
+                    type: 'defaultContent',
+                    element: 'image',
+                    data: { assetId, alt: 'Quadrado', asset: { assetId, alt: 'Quadrado', versionPolicy: 'latestPublished' } },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(photoPage.statusCode).toBe(201);
+    expect((await inject('POST', `/v1/management/sites/${siteId}/pages/${photoPage.json().id}/publish`)).statusCode).toBe(201);
+    const photoHtml = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages/by-path?path=/com-foto&format=html` });
+    expect(photoHtml.statusCode).toBe(200);
+    expect(photoHtml.body).toContain('<picture>');
+    expect(photoHtml.body).toContain(`/v1/delivery/sites/${siteKey}/assets/${assetId}/renditions/thumbnail`);
+    expect(photoHtml.body).toContain('srcset=');
+    const nextPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==', 'base64');
+    const versioned = await upload(nextPng, 'capa-v2.png', undefined, `/v1/management/sites/${siteId}/assets/${assetId}/versions`);
+    expect(versioned.statusCode).toBe(201);
+    expect(versioned.json().version).toBe(2);
+    await access(`${process.env.MEDIA_ROOT}/${siteId}/${assetId}/v1/original`);
+    await access(`${process.env.MEDIA_ROOT}/${siteId}/${assetId}/v2/original`);
+    const pinnedPage = await inject('POST', `/v1/management/sites/${siteId}/pages`, {
+      title: 'Foto fixa',
+      slug: 'foto-fixa',
+      document: {
+        schemaVersion: 1,
+        id: 'foto-fixa',
+        type: 'page',
+        locale: 'pt-BR',
+        metadata: { title: 'Foto fixa', language: 'pt-BR' },
+        slots: {
+          main: {
+            sections: [
+              {
+                id: 'section-main',
+                children: [
+                  {
+                    id: 'foto',
+                    type: 'defaultContent',
+                    element: 'image',
+                    data: { assetId, version: 1, versionPolicy: 'pinned', alt: 'Quadrado', asset: { assetId, version: 1, versionPolicy: 'pinned', alt: 'Quadrado' } },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect((await inject('POST', `/v1/management/sites/${siteId}/pages/${pinnedPage.json().id}/publish`)).statusCode).toBe(201);
+    const pinnedHtml = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages/by-path?path=/foto-fixa&format=html` });
+    expect(pinnedHtml.body).toContain(`/versions/1/renditions/thumbnail`);
+    const refreshed = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages/by-path?path=/com-foto&format=html` });
+    expect(refreshed.body).toContain(`/assets/${assetId}/renditions/thumbnail`);
+    expect(refreshed.body).not.toContain('/versions/1/');
+    const other = await app.inject({
+      method: 'POST',
+      url: '/v1/management/auth/register',
+      payload: { name: 'Outra', email: 'outra@example.com', password: 'senha-segura-123', organizationName: 'Outra Editora' },
+    });
+    const forbidden = await app.inject({
+      method: 'GET',
+      url: `/v1/management/sites/${siteId}/assets/${assetId}`,
+      headers: { authorization: `Bearer ${other.json().token}` },
+    });
+    expect(forbidden.statusCode).toBe(403);
+
     const outsider = await app.inject({
       method: 'GET',
       url: `/v1/management/sites/${siteId}`,
@@ -312,6 +430,21 @@ describe('fluxo editorial de ponta a ponta', () => {
     });
     expect(outsider.statusCode).toBe(401);
   });
+
+  async function upload(file: Buffer, filename: string, folderId?: string, url = `/v1/management/sites/${siteId}/media${folderId ? `?folderId=${folderId}` : ''}`) {
+    const boundary = '----tscms';
+    const payload = Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`),
+      file,
+      Buffer.from(`\r\n--${boundary}--\r\n`),
+    ]);
+    return app.inject({
+      method: 'POST',
+      url,
+      payload,
+      headers: { authorization: `Bearer ${token}`, 'content-type': `multipart/form-data; boundary=${boundary}` },
+    });
+  }
 
   async function inject(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, payload?: Record<string, unknown>) {
     return app.inject({

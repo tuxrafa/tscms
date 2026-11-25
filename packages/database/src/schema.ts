@@ -272,32 +272,81 @@ export const fragmentVariations = pgTable('fragment_variations', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [uniqueIndex('fragment_variations_unique').on(table.fragmentId, table.key)]);
 
+export const assetFolders = pgTable('asset_folders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  siteId: uuid('site_id').notNull().references(() => sites.id),
+  parentId: uuid('parent_id'),
+  name: text('name').notNull(),
+  path: text('path').notNull(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  ...timestamps,
+}, (table) => [uniqueIndex('asset_folders_site_path_unique').on(table.siteId, table.path)]);
+
 export const assets = pgTable('assets', {
   id: uuid('id').primaryKey().defaultRandom(),
   siteId: uuid('site_id').notNull().references(() => sites.id),
+  folderId: uuid('folder_id').references(() => assetFolders.id),
   folder: text('folder').notNull().default('/'),
   filename: text('filename').notNull(),
+  title: text('title'),
+  description: text('description').notNull().default(''),
   contentType: text('content_type').notNull(),
+  mediaType: text('media_type').notNull().default('file'),
   byteSize: integer('byte_size').notNull(),
   storageKey: text('storage_key').notNull(),
+  checksum: text('checksum'),
+  width: integer('width'),
+  height: integer('height'),
   alt: text('alt'),
   copyright: text('copyright'),
   focalPoint: jsonb('focal_point').$type<{ x: number; y: number } | null>(),
   tags: jsonb('tags').$type<string[]>().notNull().default([]),
+  status: text('status').notNull().default('ready'),
   version: integer('version').notNull().default(1),
+  createdBy: uuid('created_by').references(() => users.id),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
   ...timestamps,
-});
+}, (table) => [index('assets_site_checksum_idx').on(table.siteId, table.checksum)]);
+
+export const assetVersions = pgTable('asset_versions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  assetId: uuid('asset_id').notNull().references(() => assets.id),
+  version: integer('version').notNull(),
+  storageKey: text('storage_key').notNull(),
+  contentType: text('content_type').notNull(),
+  checksum: text('checksum').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  width: integer('width'),
+  height: integer('height'),
+  createdBy: uuid('created_by').references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex('asset_versions_asset_version_unique').on(table.assetId, table.version)]);
 
 export const assetVariants = pgTable('asset_variants', {
   id: uuid('id').primaryKey().defaultRandom(),
   assetId: uuid('asset_id').notNull().references(() => assets.id),
+  versionId: uuid('version_id').references(() => assetVersions.id),
+  preset: text('preset'),
   width: integer('width').notNull(),
+  height: integer('height'),
   format: text('format').notNull(),
   storageKey: text('storage_key').notNull(),
   byteSize: integer('byte_size').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const assetCollections = pgTable('asset_collections', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  siteId: uuid('site_id').notNull().references(() => sites.id),
+  name: text('name').notNull(),
+  description: text('description').notNull().default(''),
+  ...timestamps,
+});
+
+export const assetCollectionItems = pgTable('asset_collection_items', {
+  collectionId: uuid('collection_id').notNull().references(() => assetCollections.id),
+  assetId: uuid('asset_id').notNull().references(() => assets.id),
+}, (table) => [primaryKey({ columns: [table.collectionId, table.assetId] })]);
 
 export const contentReferences = pgTable('content_references', {
   id: uuid('id').primaryKey().defaultRandom(),

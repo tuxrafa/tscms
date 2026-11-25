@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { ContentService } from './content.service.js';
 import { AccessService } from './access.service.js';
 import { ApiException, CurrentUser, parseInput, Public, type AuthUser } from './common.js';
+import { DamService } from './dam.service.js';
 import { DeliveryService } from './delivery.service.js';
 import { ExperienceService } from './experience.service.js';
 import { IdentityService } from './identity.service.js';
@@ -99,6 +100,7 @@ export class ContentController {
     private readonly content: ContentService,
     private readonly experience: ExperienceService,
     private readonly platform: PlatformService,
+    private readonly dam: DamService,
     private readonly database: DatabaseService,
     private readonly access: AccessService,
   ) {}
@@ -317,17 +319,80 @@ export class ContentController {
     return this.platform.importFeed(user, siteId, body);
   }
 
+  @Get('sites/:siteId/asset-folders')
+  listAssetFolders(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string) {
+    return this.dam.listFolders(user, siteId);
+  }
+
+  @Post('sites/:siteId/asset-folders')
+  createAssetFolder(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Body() body: unknown) {
+    return this.dam.createFolder(user, siteId, body);
+  }
+
+  @Get('sites/:siteId/asset-collections')
+  listAssetCollections(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string) {
+    return this.dam.listCollections(user, siteId);
+  }
+
+  @Post('sites/:siteId/asset-collections')
+  createAssetCollection(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Body() body: unknown) {
+    return this.dam.createCollection(user, siteId, body);
+  }
+
+  @Post('sites/:siteId/asset-collections/:collectionId/items')
+  addCollectionItem(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('collectionId') collectionId: string, @Body() body: { assetId?: string }) {
+    return this.dam.addToCollection(user, siteId, collectionId, body.assetId ?? '');
+  }
+
   @Get('sites/:siteId/media')
-  listMedia(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string) {
-    return this.platform.listAssets(user, siteId);
+  listMedia(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Query('folderId') folderId?: string, @Query('q') q?: string) {
+    return this.dam.listAssets(user, siteId, { folderId, q });
+  }
+
+  @Get('sites/:siteId/assets/:assetId')
+  getAsset(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('assetId') assetId: string) {
+    return this.dam.getAsset(user, siteId, assetId);
+  }
+
+  @Patch('sites/:siteId/assets/:assetId')
+  updateAsset(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('assetId') assetId: string, @Body() body: unknown) {
+    return this.dam.updateMetadata(user, siteId, assetId, body);
+  }
+
+  @Post('sites/:siteId/assets/:assetId/publish')
+  publishAsset(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('assetId') assetId: string) {
+    return this.dam.setStatus(user, siteId, assetId, 'published');
+  }
+
+  @Post('sites/:siteId/assets/:assetId/unpublish')
+  unpublishAsset(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('assetId') assetId: string) {
+    return this.dam.setStatus(user, siteId, assetId, 'ready');
+  }
+
+  @Get('sites/:siteId/assets/:assetId/renditions/:preset')
+  async managedRendition(
+    @CurrentUser() user: AuthUser,
+    @Param('siteId') siteId: string,
+    @Param('assetId') assetId: string,
+    @Param('preset') preset: string,
+    @Res() reply: FastifyReply,
+  ) {
+    const file = await this.dam.readManagedRendition(user, siteId, assetId, preset);
+    reply.header('content-type', file.contentType);
+    reply.header('cache-control', 'private, max-age=60');
+    return reply.send(file.body);
   }
 
   @Post('sites/:siteId/media')
-  async upload(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Req() request: FastifyRequest) {
-    const file = await (request as FastifyRequest & { file: () => Promise<{ filename: string; mimetype: string; toBuffer: () => Promise<Buffer> } | undefined> }).file();
-    if (!file) throw new ApiException(400, 'validation_error', 'Arquivo ausente.');
-    const buffer = await file.toBuffer();
-    return this.platform.saveAsset(user, siteId, { filename: file.filename, mimetype: file.mimetype, buffer });
+  async upload(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Query('folderId') folderId: string | undefined, @Query('force') force: string | undefined, @Req() request: FastifyRequest) {
+    const file = await this.uploadedFile(request);
+    return this.dam.upload(user, siteId, file, { folderId: folderId || null, force: force === 'true' });
+  }
+
+  @Post('sites/:siteId/assets/:assetId/versions')
+  async uploadVersion(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('assetId') assetId: string, @Req() request: FastifyRequest) {
+    const file = await this.uploadedFile(request);
+    return this.dam.addVersion(user, siteId, assetId, file);
   }
 
   @Post('sites/:siteId/redirects')
@@ -355,6 +420,12 @@ export class ContentController {
   components() {
     return manifestFromCatalog('catalog');
   }
+
+  private async uploadedFile(request: FastifyRequest) {
+    const file = await (request as FastifyRequest & { file: () => Promise<{ filename: string; mimetype: string; toBuffer: () => Promise<Buffer> } | undefined> }).file();
+    if (!file) throw new ApiException(400, 'validation_error', 'Arquivo ausente.');
+    return { filename: file.filename, buffer: await file.toBuffer() };
+  }
 }
 
 @ApiTags('delivery')
@@ -363,6 +434,7 @@ export class DeliveryController {
   constructor(
     private readonly delivery: DeliveryService,
     private readonly files: PlatformService,
+    private readonly dam: DamService,
   ) {}
 
   @Public()
@@ -429,6 +501,38 @@ export class DeliveryController {
   @Get('sites/:siteKey/search')
   search(@Param('siteKey') siteKey: string, @Query('q') q = '', @Query('locale') locale?: string) {
     return this.delivery.search(siteKey, q, locale);
+  }
+
+  @Public()
+  @Get('sites/:siteKey/assets/:id')
+  asset(@Param('siteKey') siteKey: string, @Param('id') id: string) {
+    return this.dam.publicAsset(siteKey, id);
+  }
+
+  @Public()
+  @Get('sites/:siteKey/assets/:id/renditions/:preset')
+  async assetRendition(@Param('siteKey') siteKey: string, @Param('id') id: string, @Param('preset') preset: string, @Res() reply: FastifyReply) {
+    const file = await this.dam.readRendition(siteKey, id, preset, { publicOnly: true });
+    reply.header('content-type', file.contentType);
+    reply.header('cache-control', 'public, max-age=300');
+    reply.header('etag', `"${id}-v${file.version}-${preset}"`);
+    return reply.send(file.body);
+  }
+
+  @Public()
+  @Get('sites/:siteKey/assets/:id/versions/:version/renditions/:preset')
+  async assetVersionRendition(
+    @Param('siteKey') siteKey: string,
+    @Param('id') id: string,
+    @Param('version') version: string,
+    @Param('preset') preset: string,
+    @Res() reply: FastifyReply,
+  ) {
+    const file = await this.dam.readRendition(siteKey, id, preset, { publicOnly: true, version: Number(version) });
+    reply.header('content-type', file.contentType);
+    reply.header('cache-control', 'public, max-age=31536000, immutable');
+    reply.header('etag', `"${id}-v${file.version}-${preset}"`);
+    return reply.send(file.body);
   }
 
   @Public()
