@@ -6,6 +6,37 @@ import { applyAutoBlocks, renderPageHtml, renderPlainMain } from './index.js';
 
 const context = { siteKey: 'revista', publicBaseUrl: 'http://127.0.0.1:3000', runtime: 'tscms' as const };
 
+describe('imagens', () => {
+  it('carrega lazy por padrão e só antecipa com a opção do componente', () => {
+    const document = emptyDocument({ id: 'fotos', type: 'page', title: 'Fotos' });
+    document.slots.main = {
+      sections: [
+        {
+          id: 's1',
+          children: [
+            { id: 'capa', type: 'block', name: 'hero', data: { title: 'Capa', image: { src: '/media/capa.webp', alt: 'Capa' } } },
+            { id: 'foto', type: 'defaultContent', element: 'image', data: { src: '/media/foto.jpg', alt: 'Foto' } },
+            { id: 'agora', type: 'defaultContent', element: 'image', data: { src: '/media/agora.jpg', alt: 'Agora', eager: true } },
+          ],
+        },
+        {
+          id: 's2',
+          children: [
+            { id: 'hero-eager', type: 'block', name: 'hero', options: ['eager'], data: { title: 'Já', image: { src: '/media/ja.webp', alt: 'Já' } } },
+            { id: 'cards', type: 'block', name: 'cards', data: { eager: true, cards: [{ title: 'Card', image: { src: '/media/card.webp', alt: 'Card' } }] } },
+          ],
+        },
+      ],
+    };
+    const html = renderPlainMain(document, context);
+    expect(html).toContain('<img src="/media/capa.webp" alt="Capa" loading="lazy">');
+    expect(html).toContain('<img src="/media/foto.jpg" alt="Foto" loading="lazy">');
+    expect(html).toContain('<img src="/media/agora.jpg" alt="Agora" loading="eager" fetchpriority="high">');
+    expect(html).toContain('<img src="/media/ja.webp" alt="Já" loading="eager" fetchpriority="high">');
+    expect(html).toContain('<img src="/media/card.webp" alt="Card" loading="eager" fetchpriority="high">');
+  });
+});
+
 describe('basePath no HTML', () => {
   it('prefixa assets e feed quando basePath está definido', () => {
     const document = emptyDocument({ id: 'home', type: 'page', title: 'Home' });

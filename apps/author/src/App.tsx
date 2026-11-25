@@ -13,11 +13,14 @@ import {
   type HistoryState,
 } from '@tscms/content-schema';
 import { Button, Field, Panel, TextInput } from '@tscms/ui';
-import { useEffect, useState, type FormEvent } from 'react';
+import type { FieldDefinition } from '@tscms/content-schema';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import LinkExtension from '@tiptap/extension-link';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import { t } from './i18n';
+import { canonicalToEditor, editorToCanonical, plainRichText } from './rich-text';
 import { api, useSession } from './session';
 
 const defaultElements: Record<string, DefaultContentNode['element']> = {
@@ -409,7 +412,7 @@ function PageEditor({ siteId }: { siteId: string }) {
               onClick={() => setSelected(node.id)}
             >
               <span className="text-xs uppercase text-ink/50">{node.type === 'block' ? node.name : node.type === 'defaultContent' ? node.element : 'fragmento'}</span>
-              <p>{node.type === 'block' ? String(node.data.title ?? node.name) : node.type === 'defaultContent' ? String(node.data.text ?? node.element) : node.fragmentId}</p>
+              <p>{nodeSummary(node)}</p>
             </button>
           ))}
         </div>
@@ -417,6 +420,8 @@ function PageEditor({ siteId }: { siteId: string }) {
           <h2 className="mb-2 font-serif text-xl">{t('inspector', locale)}</h2>
           {selectedNode && selectedNode.type !== 'fragmentReference' ? (
             <Inspector
+              definition={definitionFor(selectedNode)}
+              nodeId={selectedNode.id}
               value={selectedNode.data}
               onChange={(data) =>
                 setHistory(
@@ -432,7 +437,6 @@ function PageEditor({ siteId }: { siteId: string }) {
           ) : (
             <p className="text-sm text-ink/60">Selecione um bloco.</p>
           )}
-          <RichNote />
         </aside>
       </div>
     </DndContext>
@@ -455,9 +459,43 @@ function LibraryButton({ item, onInsert }: { item: ComponentDefinition; onInsert
   );
 }
 
-function Inspector({ value, onChange }: { value: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void }) {
+function definitionFor(node: ContentNode): ComponentDefinition | undefined {
+  if (node.type === 'block') return componentCatalog.find((item) => item.name === node.name);
+  if (node.type !== 'defaultContent') return undefined;
+  const name = Object.entries(defaultElements).find(([, element]) => element === node.element)?.[0];
+  return name ? componentCatalog.find((item) => item.name === name) : undefined;
+}
+
+function nodeSummary(node: ContentNode): string {
+  if (node.type === 'fragmentReference') return node.fragmentId;
+  if (node.type === 'defaultContent' && node.element === 'text') return plainRichText(node.data.body) || 'Texto';
+  if (node.type === 'defaultContent') return String(node.data.text ?? node.data.alt ?? node.data.label ?? node.element);
+  return String(node.data.title ?? node.name);
+}
+
+function Inspector({
+  definition,
+  nodeId,
+  value,
+  onChange,
+}: {
+  definition?: ComponentDefinition;
+  nodeId: string;
+  value: Record<string, unknown>;
+  onChange: (value: Record<string, unknown>) => void;
+}) {
+  const richFields = definition?.fields.filter((field) => field.type === 'richtext') ?? [];
+  const booleanFields = definition?.fields.filter((field) => field.type === 'boolean') ?? [];
   return (
     <div className="flex flex-col gap-2">
+      {richFields.map((field) => (
+        <RichTextField
+          key={`${nodeId}:${field.name}`}
+          label={field.label ?? field.name}
+          value={value[field.name]}
+          onChange={(body) => onChange({ ...value, [field.name]: body })}
+        />
+      ))}
       {Object.entries(value)
         .filter(([, entry]) => ['string', 'number'].includes(typeof entry))
         .map(([key, entry]) => (
@@ -465,16 +503,53 @@ function Inspector({ value, onChange }: { value: Record<string, unknown>; onChan
             <TextInput value={String(entry)} onChange={(event) => onChange({ ...value, [key]: event.target.value })} />
           </Field>
         ))}
+      {booleanFields.map((field) => (
+        <BooleanOption key={field.name} field={field} checked={value[field.name] === true} onChange={(checked) => onChange({ ...value, [field.name]: checked })} />
+      ))}
     </div>
   );
 }
 
-function RichNote() {
-  const editor = useEditor({ extensions: [StarterKit], content: '<p>Nota editorial. O rich text persistido continua estruturado.</p>' });
+function BooleanOption({ field, checked, onChange }: { field: FieldDefinition; checked: boolean; onChange: (checked: boolean) => void }) {
   return (
-    <div className="prose mt-4 max-w-none rounded-2xl border border-line p-2 text-sm">
-      <EditorContent editor={editor} />
-    </div>
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span>{field.label ?? field.name}</span>
+    </label>
+  );
+}
+
+function RichTextField({ label, value, onChange }: { label: string; value: unknown; onChange: (value: ReturnType<typeof editorToCanonical>) => void }) {
+  const valueRef = useRef(value);
+  const onChangeRef = useRef(onChange);
+  valueRef.current = value;
+  onChangeRef.current = onChange;
+  const editor = useEditor({
+    extensions: [StarterKit, LinkExtension.configure({ openOnClick: false, autolink: false })],
+    content: canonicalToEditor(value),
+    onUpdate: ({ editor: current }) => {
+      const next = editorToCanonical(current.getJSON());
+      if (JSON.stringify(next) === JSON.stringify(editorToCanonical(canonicalToEditor(valueRef.current)))) return;
+      onChangeRef.current(next);
+    },
+  });
+  useEffect(() => {
+    if (!editor) return;
+    const next = canonicalToEditor(value);
+    if (JSON.stringify(editorToCanonical(editor.getJSON())) === JSON.stringify(editorToCanonical(next))) return;
+    editor.commands.setContent(next, false);
+  }, [editor, value]);
+  return (
+    <Field label={label}>
+      <div className="rounded-2xl border border-line">
+        <div className="flex gap-1 border-b border-line p-1">
+          <Button type="button" variant="ghost" onClick={() => editor?.chain().focus().toggleBold().run()}>Negrito</Button>
+          <Button type="button" variant="ghost" onClick={() => editor?.chain().focus().toggleItalic().run()}>Itálico</Button>
+          <Button type="button" variant="ghost" onClick={() => editor?.chain().focus().toggleBulletList().run()}>Lista</Button>
+        </div>
+        <EditorContent editor={editor} className="prose max-w-none px-2 py-1 text-sm" />
+      </div>
+    </Field>
   );
 }
 
