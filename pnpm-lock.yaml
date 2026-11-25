@@ -350,6 +350,9 @@ importers:
       '@tscms/content-schema':
         specifier: workspace:*
         version: link:../content-schema
+      '@tscms/performance-defaults':
+        specifier: workspace:*
+        version: link:../performance-defaults
 
   packages/eds-runtime: {}
 
@@ -370,6 +373,12 @@ importers:
         specifier: ^0.34.5
         version: 0.34.5
 
+  packages/performance-defaults:
+    dependencies:
+      '@tscms/content-schema':
+        specifier: workspace:*
+        version: link:../content-schema
+
   packages/publishing:
     dependencies:
       '@tscms/content-schema':
@@ -378,6 +387,9 @@ importers:
       '@tscms/core-domain':
         specifier: workspace:*
         version: link:../core-domain
+      '@tscms/performance-defaults':
+        specifier: workspace:*
+        version: link:../performance-defaults
       fast-xml-parser:
         specifier: ^5.3.0
         version: 5.12.1

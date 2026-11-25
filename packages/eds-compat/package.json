@@ -7,6 +7,7 @@
   },
   "dependencies": {
     "@tscms/block-registry": "workspace:*",
-    "@tscms/content-schema": "workspace:*"
+    "@tscms/content-schema": "workspace:*",
+    "@tscms/performance-defaults": "workspace:*"
   }
 }

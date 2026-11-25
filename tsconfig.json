@@ -19,6 +19,7 @@
       "@tscms/author-sdk": ["packages/author-sdk/src/index.ts"],
       "@tscms/eds-compat": ["packages/eds-compat/src/index.ts"],
       "@tscms/eds-runtime": ["packages/eds-runtime/src/index.ts"],
+      "@tscms/performance-defaults": ["packages/performance-defaults/src/index.ts"],
       "@tscms/renderer-contracts": ["packages/renderer-contracts/src/index.ts"],
       "@tscms/embed-sdk": ["packages/embed-sdk/src/index.ts"],
       "@tscms/cli": ["packages/cli/src/index.ts"],

@@ -8,6 +8,7 @@
   "dependencies": {
     "@tscms/content-schema": "workspace:*",
     "@tscms/core-domain": "workspace:*",
+    "@tscms/performance-defaults": "workspace:*",
     "fast-xml-parser": "^5.3.0"
   }
 }
