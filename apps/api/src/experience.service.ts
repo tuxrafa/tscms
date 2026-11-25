@@ -153,6 +153,30 @@ export class ExperienceService {
     return folder;
   }
 
+  async listPages(user: AuthUser, siteId: string) {
+    await this.access.requireSite(user.id, siteId, 'content:read');
+    const data = await this.database.db
+      .select({
+        id: pages.id,
+        title: pages.title,
+        path: pages.path,
+        slug: pages.slug,
+        status: pages.status,
+        folderId: pages.folderId,
+        version: pages.version,
+        locale: pages.locale,
+      })
+      .from(pages)
+      .where(and(eq(pages.siteId, siteId), isNull(pages.deletedAt)))
+      .orderBy(asc(pages.path));
+    return { data };
+  }
+
+  async getPage(user: AuthUser, siteId: string, pageId: string) {
+    await this.access.requireSite(user.id, siteId, 'content:read');
+    return this.mustPage(siteId, pageId);
+  }
+
   async tree(user: AuthUser, siteId: string, parentFolderId?: string) {
     await this.access.requireSite(user.id, siteId, 'content:read');
     const folderFilter = parentFolderId ? eq(folders.parentId, parentFolderId) : isNull(folders.parentId);
