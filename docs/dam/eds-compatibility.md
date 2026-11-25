@@ -2,7 +2,9 @@
 
 O renderer não importa o DAM. A Delivery API resolve `assetId` antes de gerar o HTML e preenche as renditions. Cada componente de imagem vira um `<picture>` com um `<source>` por faixa de tela: até 480 px, até 768 px, até 1200 px e acima disso. A imagem usa `loading="lazy"`, salvo quando o bloco pede carregamento imediato.
 
-Enquanto o arquivo não carrega, o quadro pulsa. Se existe uma miniatura diferente, ela aparece desfocada nesse quadro. Sem renditions, a URL disponível é repetida em todas as faixas e o quadro usa um brilho animado, sem baixar o arquivo duas vezes.
+Imagens eager seguem os [Portal Performance Defaults](../performance/performance-defaults.md): `fetchpriority="high"`, `decoding="sync"` e `data-eager` (sem fade bloqueando o LCP). O HTML de página também pode incluir um `<link rel="preload" as="image">` da candidata a LCP antes do CSS.
+
+Enquanto o arquivo lazy não carrega, o quadro pulsa. Se existe uma miniatura diferente, ela aparece desfocada nesse quadro. Sem renditions, a URL disponível é repetida em todas as faixas e o quadro usa um brilho animado, sem baixar o arquivo duas vezes.
 
 Blocos que esperam uma imagem no DOM, como hero e cards, recebem esse HTML e não precisam conhecer o DAM.
 

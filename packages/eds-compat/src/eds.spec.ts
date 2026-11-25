@@ -29,11 +29,12 @@ describe('imagens', () => {
       ],
     };
     const html = renderPlainMain(document, context);
-    expect(html).toContain('<img src="/media/capa.webp" alt="Capa" loading="lazy"');
-    expect(html).toContain('<img src="/media/foto.jpg" alt="Foto" loading="lazy"');
-    expect(html).toContain('<img src="/media/agora.jpg" alt="Agora" loading="eager" fetchpriority="high"');
-    expect(html).toContain('<img src="/media/ja.webp" alt="Já" loading="eager" fetchpriority="high"');
-    expect(html).toContain('<img src="/media/card.webp" alt="Card" loading="eager" fetchpriority="high"');
+    expect(html).toContain('<img src="/media/capa.webp" alt="Capa" loading="lazy" decoding="async"');
+    expect(html).toContain('<img src="/media/foto.jpg" alt="Foto" loading="lazy" decoding="async"');
+    expect(html).toContain('data-eager');
+    expect(html).toContain('<img src="/media/agora.jpg" alt="Agora" loading="eager" fetchpriority="high" decoding="sync"');
+    expect(html).toContain('<img src="/media/ja.webp" alt="Já" loading="eager" fetchpriority="high" decoding="sync"');
+    expect(html).toContain('<img src="/media/card.webp" alt="Card" loading="eager" fetchpriority="high" decoding="sync"');
     for (const url of ['/media/capa.webp', '/media/foto.jpg', '/media/card.webp']) {
       expect(html).toContain(`media="(max-width: 480px)" srcset="${url}"`);
       expect(html).toContain(`media="(max-width: 768px)" srcset="${url}"`);
@@ -41,6 +42,30 @@ describe('imagens', () => {
       expect(html).toContain(`media="(min-width: 1201px)" srcset="${url}"`);
     }
     expect(html).toContain('asset-picture-shimmer');
+    expect(html).toContain('picture.asset-picture[data-eager] img{opacity:1}');
+  });
+
+  it('injeta preload da imagem LCP no head com fetchpriority', () => {
+    const document = emptyDocument({ id: 'home', type: 'page', title: 'Home' });
+    document.metadata = { title: 'Home', language: 'pt-BR' };
+    document.slots.main?.sections[0]?.children.push({
+      id: 'hero',
+      type: 'block',
+      name: 'hero',
+      options: ['eager'],
+      data: {
+        title: 'Capa',
+        image: {
+          src: '/a/large.webp',
+          alt: 'Capa',
+          srcset: '/a/small.webp 480w, /a/medium.webp 768w, /a/large.webp 1200w',
+        },
+      },
+    });
+    const html = renderPageHtml(document, context);
+    expect(html).toContain('<link rel="preload" as="image" href="/a/medium.webp" fetchpriority="high"');
+    expect(html).toContain('imagesrcset=');
+    expect(html.indexOf('rel="preload"')).toBeLessThan(html.indexOf('styles/styles.css'));
   });
 
   it('escolhe a rendition pela tela e usa a miniatura como placeholder', () => {
@@ -60,7 +85,7 @@ describe('imagens', () => {
     expect(html).toContain('media="(max-width: 768px)" srcset="/a/medium.webp"');
     expect(html).toContain('media="(max-width: 1200px)" srcset="/a/large.webp"');
     expect(html).toContain('media="(min-width: 1201px)" srcset="/a/xlarge.webp"');
-    expect(html).toContain('<img src="/a/xlarge.webp" alt="Capa" loading="lazy"');
+    expect(html).toContain('<img src="/a/xlarge.webp" alt="Capa" loading="lazy" decoding="async"');
     expect(html).toContain("--asset-preview:url('/a/thumbnail.webp')");
   });
 });

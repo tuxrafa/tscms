@@ -2,6 +2,15 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { assertPublicHttpUrl } from '@tscms/core-domain';
 
+/** Publication Performance Analyzer — reexported for the publish pipeline. */
+export {
+  analyzePublicationPerformance,
+  performanceBudgets,
+  portalPerformanceDefaults,
+  type PerformanceFinding,
+  type PublicationPerformanceReport,
+} from '@tscms/performance-defaults';
+
 export interface FeedItem {
   title: string;
   link: string;

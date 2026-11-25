@@ -1,6 +1,12 @@
 import { classNamesFor } from '@tscms/block-registry';
 import type { CanonicalDocument, ContentNode, RichTextDocument, SectionNode } from '@tscms/content-schema';
-import { assetPictureStyle, escapeAttr, escapeHtml, renderPicture } from './html.js';
+import {
+  analyzePublicationPerformance,
+  buildImagePreloadHtml,
+  defaultSizesForRole,
+  portalPerformanceDefaults,
+} from '@tscms/performance-defaults';
+import { assetPictureStyle, escapeAttr, escapeHtml, parseSrcset, renderPicture } from './html.js';
 
 export interface RenderContext {
   siteKey: string;
@@ -57,7 +63,61 @@ export function renderPageHtml(document: CanonicalDocument, context: RenderConte
     context.runtime === 'adobe'
       ? `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/aem.js'))}" type="module"></script><script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`
       : `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`;
-  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="${escapeAttr(feedHref)}"><link rel="stylesheet" href="${escapeAttr(stylesHref)}">${structured}${scripts}</head><body><header></header><main>${renderPlainMain(document, context)}</main><footer></footer></body></html>`;
+  const lcpPreload = portalPerformanceDefaults.images.prioritizeLcp ? lcpPreloadLink(document) : '';
+  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="${escapeAttr(feedHref)}">${lcpPreload}<link rel="stylesheet" href="${escapeAttr(stylesHref)}">${structured}${scripts}</head><body><header></header><main>${renderPlainMain(document, context)}</main><footer></footer></body></html>`;
+}
+
+/** Early LCP discovery: preload the first eager image before render-blocking CSS. */
+function lcpPreloadLink(document: CanonicalDocument): string {
+  const report = analyzePublicationPerformance(document);
+  const candidate = report.lcpCandidate;
+  if (!candidate?.eager || !candidate.src) return '';
+  // Prefer a mid-band URL from srcset when the node carried one — walk again for srcset.
+  const enriched = findEagerImageSrcset(document);
+  const href = enriched?.preferred ?? candidate.src;
+  return buildImagePreloadHtml({
+    href,
+    imagesrcset: enriched?.srcset,
+    imagesizes: defaultSizesForRole('hero'),
+    fetchpriority: 'high',
+  });
+}
+
+function findEagerImageSrcset(
+  document: CanonicalDocument,
+): { preferred: string; srcset?: string } | undefined {
+  for (const slot of Object.values(document.slots)) {
+    for (const section of slot.sections) {
+      for (const node of section.children) {
+        if (node.type !== 'block' && node.type !== 'defaultContent') continue;
+        const data =
+          node.type === 'defaultContent'
+            ? (node.data as Record<string, unknown>)
+            : ((node.data ?? {}) as Record<string, unknown>);
+        const options = node.type === 'block' ? node.options : undefined;
+        const eager =
+          options?.includes('eager') || data.eager === true || data.loading === 'eager' || (node.type === 'defaultContent' && data.eager === true);
+        const image =
+          data.image && typeof data.image === 'object'
+            ? (data.image as Record<string, unknown>)
+            : node.type === 'defaultContent' && node.element === 'image'
+              ? data
+              : null;
+        if (!eager || !image) continue;
+        const src = String(image.src ?? '');
+        const srcset = typeof image.srcset === 'string' ? image.srcset : undefined;
+        if (!src) continue;
+        if (srcset) {
+          const parsed = parseSrcset(srcset);
+          const medium = parsed.find((item) => (item.width ?? 0) >= 640 && (item.width ?? 0) <= 900);
+          const preferred = medium?.url ?? src;
+          return { preferred, srcset };
+        }
+        return { preferred: src };
+      }
+    }
+  }
+  return undefined;
 }
 
 function renderSection(section: SectionNode, context: RenderContext): string {

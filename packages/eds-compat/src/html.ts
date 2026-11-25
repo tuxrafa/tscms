@@ -1,3 +1,5 @@
+import { pictureLoadingAttrs } from '@tscms/performance-defaults';
+
 export function escapeHtml(value: string): string {
   return value
     .replaceAll('&', '&amp;')
@@ -32,8 +34,24 @@ const screenSlots = [
   { media: '(min-width: 1201px)', max: Number.POSITIVE_INFINITY },
 ] as const;
 
+/**
+ * Eager images use data-eager so opacity is not gated on onload (LCP render delay).
+ * Lazy images keep the shimmer / fade until data-loaded.
+ */
 export const assetPictureStyle =
-  '<style data-asset-picture>picture.asset-picture{display:block;position:relative;overflow:hidden;background:#e8e2d8 center/cover no-repeat;background-image:linear-gradient(100deg,#ddd6cb 20%,#f7f4ef 50%,#ddd6cb 80%);background-size:200% 100%;animation:asset-picture-shimmer 1.1s linear infinite}picture.asset-picture[style]{animation:none;background-image:none}picture.asset-picture::before{content:"";position:absolute;inset:0;background:#e8e2d8 center/cover no-repeat;background-image:var(--asset-preview);filter:blur(12px);transform:scale(1.08);animation:asset-picture-pulse 1.3s ease-in-out infinite}picture.asset-picture:not([style])::before{content:none}picture.asset-picture[data-loaded]{animation:none;background-image:none}picture.asset-picture[data-loaded]::before{opacity:0;animation:none}picture.asset-picture img{position:relative;z-index:1;display:block;width:100%;height:auto;opacity:0;transition:opacity .35s ease}picture.asset-picture[data-loaded] img{opacity:1}@keyframes asset-picture-shimmer{to{background-position:200% 0}}@keyframes asset-picture-pulse{50%{filter:blur(12px) brightness(1.12)}}</style>';
+  '<style data-asset-picture>' +
+  'picture.asset-picture{display:block;position:relative;overflow:hidden;background:#e8e2d8 center/cover no-repeat;background-image:linear-gradient(100deg,#ddd6cb 20%,#f7f4ef 50%,#ddd6cb 80%);background-size:200% 100%;animation:asset-picture-shimmer 1.1s linear infinite}' +
+  'picture.asset-picture[style]{animation:none;background-image:none}' +
+  'picture.asset-picture::before{content:"";position:absolute;inset:0;background:#e8e2d8 center/cover no-repeat;background-image:var(--asset-preview);filter:blur(12px);transform:scale(1.08);animation:asset-picture-pulse 1.3s ease-in-out infinite}' +
+  'picture.asset-picture:not([style])::before{content:none}' +
+  'picture.asset-picture[data-loaded]{animation:none;background-image:none}' +
+  'picture.asset-picture[data-loaded]::before{opacity:0;animation:none}' +
+  'picture.asset-picture img{position:relative;z-index:1;display:block;width:100%;height:auto}' +
+  'picture.asset-picture:not([data-eager]) img{opacity:0;transition:opacity .35s ease}' +
+  'picture.asset-picture[data-loaded] img,picture.asset-picture[data-eager] img{opacity:1}' +
+  '@keyframes asset-picture-shimmer{to{background-position:200% 0}}' +
+  '@keyframes asset-picture-pulse{50%{filter:blur(12px) brightness(1.12)}}' +
+  '</style>';
 
 export function renderPicture(input: PictureInput, eager = false): string {
   const sources = input.sources?.length ? input.sources : parseSrcset(input.srcset);
@@ -42,12 +60,19 @@ export function renderPicture(input: PictureInput, eager = false): string {
   const imgSrc = sources.length > 0 ? urlForWidth(sources, Number.POSITIVE_INFINITY, fallback) : fallback;
   const preview = previewUrl(sources, imgSrc);
   const style = preview ? ` style="--asset-preview:url('${escapeCss(preview)}')"` : '';
-  const loading = eager ? 'eager' : 'lazy';
-  const fetchPriority = eager ? ' fetchpriority="high"' : '';
+  const loadingAttrs = pictureLoadingAttrs(eager);
+  const eagerAttr = loadingAttrs.dataEager ? ' data-eager' : '';
+  const fetchPriority = loadingAttrs.fetchpriority ? ` fetchpriority="${loadingAttrs.fetchpriority}"` : '';
+  const dimensions =
+    input.width && input.height
+      ? ` width="${input.width}" height="${input.height}"`
+      : input.width
+        ? ` width="${input.width}"`
+        : '';
   const sourceTags = chosen
     .map((slot) => `<source media="${slot.media}" srcset="${escapeAttr(slot.url)}"${typeFor(slot.url)}>`)
     .join('');
-  return `<picture class="asset-picture"${style}>${sourceTags}<img src="${escapeAttr(imgSrc)}" alt="${escapeAttr(input.alt)}" loading="${loading}"${fetchPriority} decoding="async" onload="this.closest('picture').setAttribute('data-loaded','')"></picture>`;
+  return `<picture class="asset-picture"${eagerAttr}${style}>${sourceTags}<img src="${escapeAttr(imgSrc)}" alt="${escapeAttr(input.alt)}"${dimensions} loading="${loadingAttrs.loading}"${fetchPriority} decoding="${loadingAttrs.decoding}" onload="this.closest('picture').setAttribute('data-loaded','')"></picture>`;
 }
 
 export function parseSrcset(srcset: string | undefined): PictureSource[] {
