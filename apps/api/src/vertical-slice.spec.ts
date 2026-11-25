@@ -196,6 +196,24 @@ describe('fluxo editorial de ponta a ponta', () => {
     });
     expect(page.statusCode).toBe(201);
     pageId = page.json().id;
+    const opened = await inject('GET', `/v1/management/sites/${siteId}/pages/${pageId}`);
+    expect(opened.statusCode).toBe(200);
+    expect(opened.json().path).toBe('/capa');
+    const folder = await inject('POST', `/v1/management/sites/${siteId}/folders`, { name: 'Blog' });
+    expect(folder.statusCode).toBe(201);
+    const nested = await inject('POST', `/v1/management/sites/${siteId}/pages`, {
+      title: 'Artigo interno',
+      folderId: folder.json().id,
+    });
+    expect(nested.statusCode).toBe(201);
+    expect(nested.json().path).toBe('/blog/artigo-interno');
+    const nestedOpen = await inject('GET', `/v1/management/sites/${siteId}/pages/${nested.json().id}`);
+    expect(nestedOpen.statusCode).toBe(200);
+    expect(nestedOpen.json().document.metadata.title).toBe('Artigo interno');
+    const listed = await inject('GET', `/v1/management/sites/${siteId}/pages`);
+    expect(listed.json().data.some((item: { id: string; path: string }) => item.id === nested.json().id && item.path === '/blog/artigo-interno')).toBe(true);
+    const rootOnly = await inject('GET', `/v1/management/sites/${siteId}/tree`);
+    expect(rootOnly.json().pages.some((item: { id: string }) => item.id === nested.json().id)).toBe(false);
     const pagePublished = await inject('POST', `/v1/management/sites/${siteId}/pages/${pageId}/publish`);
     expect(pagePublished.statusCode).toBe(201);
 

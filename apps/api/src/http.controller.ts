@@ -195,6 +195,16 @@ export class ContentController {
     return this.experience.tree(user, siteId, parentFolderId);
   }
 
+  @Get('sites/:siteId/pages')
+  listPages(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string) {
+    return this.experience.listPages(user, siteId);
+  }
+
+  @Get('sites/:siteId/pages/:pageId')
+  getPage(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('pageId') pageId: string) {
+    return this.experience.getPage(user, siteId, pageId);
+  }
+
   @Post('sites/:siteId/pages')
   createPage(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Body() body: unknown) {
     return this.experience.createPage(user, siteId, body);

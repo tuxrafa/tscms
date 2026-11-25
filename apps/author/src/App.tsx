@@ -299,7 +299,7 @@ function PagesConsole({ siteId }: { siteId: string }) {
                 </button>
               ))}
               {(column.pages ?? []).map((page: { id: string; title: string; status: string }) => (
-                <Link key={page.id} className="block rounded-xl px-2 py-2 hover:bg-paper" to={page.id}>
+                <Link key={page.id} className="block rounded-xl px-2 py-2 hover:bg-paper" to={`/sites/${siteId}/pages/${page.id}`}>
                   <span>{page.title}</span>
                   <span className="ml-2 text-xs uppercase text-ink/50">{page.status}</span>
                 </Link>
@@ -307,16 +307,81 @@ function PagesConsole({ siteId }: { siteId: string }) {
             </div>
           ))}
         </div>
-      ) : (
-        <div className={view === 'cards' ? 'grid gap-3 md:grid-cols-3' : 'flex flex-col gap-2'}>
+      ) : view === 'cards' ? (
+        <div className="grid gap-3 md:grid-cols-3">
           {(columns.data?.[0]?.pages ?? []).map((page: { id: string; title: string; path: string; status: string }) => (
-            <Link key={page.id} to={page.id} className="rounded-2xl border border-line bg-white p-3">
+            <Link key={page.id} to={`/sites/${siteId}/pages/${page.id}`} className="rounded-2xl border border-line bg-white p-3">
               <strong>{page.title}</strong>
               <p className="text-sm text-ink/60">{page.path}</p>
             </Link>
           ))}
         </div>
+      ) : (
+        <PageList siteId={siteId} />
       )}
+    </div>
+  );
+}
+
+function PageList({ siteId }: { siteId: string }) {
+  const token = useSession((state) => state.token);
+  const locale = useSession((state) => state.locale);
+  const queryClient = useQueryClient();
+  const pages = useQuery({ queryKey: ['pages', siteId], queryFn: () => api(`/v1/management/sites/${siteId}/pages`, { token }) });
+  const rows = (pages.data?.data ?? []) as Array<{ id: string; title: string; path: string; status: string }>;
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [notice, setNotice] = useState('');
+  const visibleIds = rows.map((page) => page.id);
+  const allSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+  const action = useMutation({
+    mutationFn: async (kind: 'publish' | 'unpublish') => {
+      const results = await Promise.allSettled(
+        selectedIds.map((id) => api(`/v1/management/sites/${siteId}/pages/${id}/${kind}`, { method: 'POST', token })),
+      );
+      const failed = results.filter((result) => result.status === 'rejected').length;
+      return { failed, total: results.length };
+    },
+    onSuccess: ({ failed, total }) => {
+      setNotice(failed === 0 ? `${total} página(s) atualizada(s).` : `${failed} de ${total} não puderam ser atualizadas.`);
+      setSelectedIds([]);
+      queryClient.invalidateQueries({ queryKey: ['pages', siteId] });
+      queryClient.invalidateQueries({ queryKey: ['tree', siteId] });
+    },
+  });
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Button disabled={selectedIds.length === 0 || action.isPending} onClick={() => action.mutate('publish')}>{t('publish', locale)}</Button>
+        <Button variant="ghost" disabled={selectedIds.length === 0 || action.isPending} onClick={() => action.mutate('unpublish')}>{t('unpublish', locale)}</Button>
+        <span className="text-sm text-ink/60">{selectedIds.length} selecionadas</span>
+        {notice ? <span className="text-sm">{notice}</span> : null}
+      </div>
+      <div className="overflow-hidden rounded-3xl border border-line bg-white">
+        <label className="flex items-center gap-3 border-b border-line px-3 py-2 text-sm">
+          <input
+            type="checkbox"
+            checked={allSelected}
+            onChange={() => setSelectedIds(allSelected ? [] : visibleIds)}
+          />
+          <span>{t('selectAll', locale)}</span>
+        </label>
+        {rows.map((page) => (
+          <div key={page.id} className="flex items-center gap-3 border-b border-line px-3 py-2 last:border-b-0">
+            <input
+              type="checkbox"
+              checked={selectedIds.includes(page.id)}
+              onChange={() => setSelectedIds((current) => (current.includes(page.id) ? current.filter((id) => id !== page.id) : [...current, page.id]))}
+              aria-label={page.title}
+            />
+            <Link className="min-w-0 flex-1" to={`/sites/${siteId}/pages/${page.id}`}>
+              <strong>{page.title}</strong>
+              <span className="ml-2 text-sm text-ink/60">{page.path}</span>
+            </Link>
+            <span className="text-xs uppercase text-ink/50">{page.status}</span>
+          </div>
+        ))}
+        {rows.length === 0 ? <p className="px-3 py-4 text-sm text-ink/60">Nenhuma página.</p> : null}
+      </div>
     </div>
   );
 }
@@ -326,14 +391,22 @@ function PageEditor({ siteId }: { siteId: string }) {
   const token = useSession((state) => state.token);
   const locale = useSession((state) => state.locale);
   const queryClient = useQueryClient();
-  const page = useQuery({ queryKey: ['page-tree', siteId], queryFn: () => api(`/v1/management/sites/${siteId}/tree`, { token }) });
+  const page = useQuery({
+    queryKey: ['page', siteId, pageId],
+    queryFn: () => api(`/v1/management/sites/${siteId}/pages/${pageId}`, { token }),
+    enabled: Boolean(pageId),
+  });
   const site = useQuery({ queryKey: ['site', siteId], queryFn: () => api(`/v1/management/sites/${siteId}`, { token }) });
-  const current = (page.data?.pages ?? []).find((item: { id: string }) => item.id === pageId);
+  const current = page.data as { id: string; path: string; version: number; document: CanonicalDocument } | undefined;
   const [history, setHistory] = useState<HistoryState | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const document = history?.present;
   useEffect(() => {
-    if (current && !history) setHistory(createHistory(current.document as CanonicalDocument));
+    setHistory(null);
+    setSelected(null);
+  }, [pageId]);
+  useEffect(() => {
+    if (current?.document && !history) setHistory(createHistory(current.document));
   }, [current, history]);
   const sensors = useSensors(useSensor(PointerSensor));
   const save = useMutation({
@@ -348,6 +421,7 @@ function PageEditor({ siteId }: { siteId: string }) {
   const publish = useMutation({
     mutationFn: () => api(`/v1/management/sites/${siteId}/pages/${pageId}/publish`, { method: 'POST', token }),
   });
+  if (page.isError) return <p>Não foi possível abrir esta página.</p>;
   if (!document) return <p>Carregando a página…</p>;
   const section = document.slots.main?.sections[0];
   const selectedNode = section?.children.find((node) => node.id === selected);
