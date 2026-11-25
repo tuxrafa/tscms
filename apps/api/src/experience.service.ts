@@ -153,6 +153,16 @@ export class ExperienceService {
     return folder;
   }
 
+  async listFolders(user: AuthUser, siteId: string) {
+    await this.access.requireSite(user.id, siteId, 'content:read');
+    const data = await this.database.db
+      .select({ id: folders.id, name: folders.name, path: folders.path, parentId: folders.parentId })
+      .from(folders)
+      .where(and(eq(folders.siteId, siteId), isNull(folders.deletedAt)))
+      .orderBy(asc(folders.path));
+    return { data };
+  }
+
   async listPages(user: AuthUser, siteId: string) {
     await this.access.requireSite(user.id, siteId, 'content:read');
     const data = await this.database.db
@@ -242,17 +252,48 @@ export class ExperienceService {
     if (body.expectedVersion && body.expectedVersion !== current.version) {
       throw new ApiException(409, 'conflict', 'A página foi alterada por outra pessoa.');
     }
-    const [updated] = await this.database.db
-      .update(pages)
-      .set({
-        title: body.title ?? current.title,
-        document: body.document ?? current.document,
-        templateId: body.templateId ?? current.templateId,
-        version: current.version + 1,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(pages.id, pageId), eq(pages.version, current.version)))
-      .returning();
+    if (body.slug !== undefined && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(body.slug)) {
+      throw new ApiException(400, 'validation_error', 'O slug só pode ter letras minúsculas, números e hífens.');
+    }
+    const folderId = body.folderId === undefined ? current.folderId : body.folderId;
+    if (folderId) {
+      const [folder] = await this.database.db
+        .select({ id: folders.id })
+        .from(folders)
+        .where(and(eq(folders.id, folderId), eq(folders.siteId, siteId), isNull(folders.deletedAt)))
+        .limit(1);
+      if (!folder) throw new ApiException(404, 'not_found', 'Pasta não encontrada.');
+    }
+    const slug = body.slug ?? current.slug;
+    const path =
+      body.path ??
+      (body.slug !== undefined || body.folderId !== undefined ? await this.pathFor(siteId, folderId, slug) : current.path);
+    const locale = body.locale ?? current.locale;
+    let document = body.document ?? current.document;
+    if (body.locale && !body.document) {
+      document = { ...current.document, locale: body.locale, metadata: { ...current.document.metadata, language: body.locale } };
+    }
+    let updated;
+    try {
+      [updated] = await this.database.db
+        .update(pages)
+        .set({
+          title: body.title ?? document.metadata.title ?? current.title,
+          document,
+          templateId: body.templateId ?? current.templateId,
+          slug,
+          path,
+          locale,
+          folderId,
+          version: current.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(pages.id, pageId), eq(pages.version, current.version)))
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ApiException(409, 'conflict', 'Já existe uma página nesse caminho.');
+      throw error;
+    }
     if (!updated) throw new ApiException(409, 'conflict', 'A página foi alterada por outra pessoa.');
     await this.access.audit(this.database.db, {
       organizationId: site.organizationId,

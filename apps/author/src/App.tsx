@@ -11,6 +11,7 @@ import {
   type ContentNode,
   type DefaultContentNode,
   type HistoryState,
+  type PageMetadata,
 } from '@tscms/content-schema';
 import { Button, Field, Panel, TextInput } from '@tscms/ui';
 import type { FieldDefinition } from '@tscms/content-schema';
@@ -386,6 +387,153 @@ function PageList({ siteId }: { siteId: string }) {
   );
 }
 
+type PageRecord = {
+  id: string;
+  title: string;
+  slug: string;
+  path: string;
+  locale: string;
+  folderId: string | null;
+  status: string;
+  version: number;
+  document: CanonicalDocument;
+};
+
+type PageProperties = { slug: string; path: string; folderId: string | null };
+
+type FolderOption = { id: string; name: string; path: string };
+
+function commitDocument(state: HistoryState, present: CanonicalDocument): HistoryState {
+  return { past: [...state.past, state.present], present, future: [] };
+}
+
+function composePath(folderPath: string | null, slug: string): string {
+  if (!folderPath) return slug === 'home' ? '/' : `/${slug}`;
+  return `${folderPath.replace(/\/$/, '')}/${slug}`;
+}
+
+function metadataForSave(metadata: PageMetadata): PageMetadata {
+  const next: PageMetadata = { ...metadata, title: metadata.title.trim() };
+  for (const key of ['description', 'canonical', 'robots', 'language', 'nav', 'footer', 'template', 'theme'] as const) {
+    const value = next[key]?.trim();
+    if (!value) delete next[key];
+    else next[key] = value;
+  }
+  if (next.openGraph) {
+    const openGraph = { ...next.openGraph };
+    for (const key of ['title', 'description', 'image'] as const) {
+      const value = openGraph[key]?.trim();
+      if (!value) delete openGraph[key];
+      else openGraph[key] = value;
+    }
+    if (!openGraph.title && !openGraph.description && !openGraph.image) delete next.openGraph;
+    else next.openGraph = openGraph;
+  }
+  return next;
+}
+
+function PageSettings({
+  locale,
+  document,
+  properties,
+  folders,
+  onDocument,
+  onProperties,
+}: {
+  locale: 'pt-BR' | 'en';
+  document: CanonicalDocument;
+  properties: PageProperties;
+  folders: FolderOption[];
+  onDocument: (document: CanonicalDocument) => void;
+  onProperties: (properties: PageProperties) => void;
+}) {
+  const metadata = document.metadata;
+  const folderPath = folders.find((folder) => folder.id === properties.folderId)?.path ?? null;
+  const setMetadata = (patch: Partial<PageMetadata>, language?: string) => {
+    onDocument({
+      ...document,
+      locale: language ?? document.locale,
+      metadata: { ...metadata, ...patch },
+    });
+  };
+  const setOpenGraph = (key: 'title' | 'description' | 'image', value: string) => {
+    setMetadata({ openGraph: { ...metadata.openGraph, [key]: value } });
+  };
+  return (
+    <div className="flex flex-col gap-3">
+      <Field label={t('pageTitle', locale)}>
+        <TextInput className="w-full" value={metadata.title} onChange={(event) => setMetadata({ title: event.target.value })} />
+      </Field>
+      <Field label={t('slug', locale)}>
+        <TextInput
+          className="w-full"
+          value={properties.slug}
+          onChange={(event) => onProperties({ ...properties, slug: event.target.value, path: composePath(folderPath, event.target.value.trim() || properties.slug) })}
+        />
+      </Field>
+      <Field label={t('path', locale)}>
+        <TextInput className="w-full" value={properties.path} onChange={(event) => onProperties({ ...properties, path: event.target.value })} />
+      </Field>
+      <Field label={t('language', locale)}>
+        <TextInput
+          className="w-full"
+          value={metadata.language ?? document.locale}
+          onChange={(event) => setMetadata({ language: event.target.value }, event.target.value.trim().length >= 2 ? event.target.value.trim() : document.locale)}
+        />
+      </Field>
+      <Field label={t('folder', locale)}>
+        <select
+          className="w-full rounded-xl border border-line bg-white px-3 py-2 outline-none focus:border-pine"
+          value={properties.folderId ?? ''}
+          onChange={(event) => {
+            const folderId = event.target.value || null;
+            const nextFolder = folders.find((folder) => folder.id === folderId)?.path ?? null;
+            onProperties({ ...properties, folderId, path: composePath(nextFolder, properties.slug) });
+          }}
+        >
+          <option value="">{t('folderRoot', locale)}</option>
+          {folders.map((folder) => (
+            <option key={folder.id} value={folder.id}>
+              {folder.name} ({folder.path})
+            </option>
+          ))}
+        </select>
+      </Field>
+      <h3 className="mt-2 font-serif text-lg">{t('metadata', locale)}</h3>
+      <Field label={t('description', locale)}>
+        <TextInput className="w-full" value={metadata.description ?? ''} onChange={(event) => setMetadata({ description: event.target.value })} />
+      </Field>
+      <Field label={t('canonical', locale)}>
+        <TextInput className="w-full" value={metadata.canonical ?? ''} onChange={(event) => setMetadata({ canonical: event.target.value })} />
+      </Field>
+      <Field label={t('robots', locale)}>
+        <TextInput className="w-full" value={metadata.robots ?? ''} onChange={(event) => setMetadata({ robots: event.target.value })} />
+      </Field>
+      <Field label={t('template', locale)}>
+        <TextInput className="w-full" value={metadata.template ?? ''} onChange={(event) => setMetadata({ template: event.target.value })} />
+      </Field>
+      <Field label={t('theme', locale)}>
+        <TextInput className="w-full" value={metadata.theme ?? ''} onChange={(event) => setMetadata({ theme: event.target.value })} />
+      </Field>
+      <Field label={t('navigation', locale)}>
+        <TextInput className="w-full" value={metadata.nav ?? ''} onChange={(event) => setMetadata({ nav: event.target.value })} />
+      </Field>
+      <Field label={t('footer', locale)}>
+        <TextInput className="w-full" value={metadata.footer ?? ''} onChange={(event) => setMetadata({ footer: event.target.value })} />
+      </Field>
+      <Field label={t('socialTitle', locale)}>
+        <TextInput className="w-full" value={metadata.openGraph?.title ?? ''} onChange={(event) => setOpenGraph('title', event.target.value)} />
+      </Field>
+      <Field label={t('socialDescription', locale)}>
+        <TextInput className="w-full" value={metadata.openGraph?.description ?? ''} onChange={(event) => setOpenGraph('description', event.target.value)} />
+      </Field>
+      <Field label={t('socialImage', locale)}>
+        <TextInput className="w-full" value={metadata.openGraph?.image ?? ''} onChange={(event) => setOpenGraph('image', event.target.value)} />
+      </Field>
+    </div>
+  );
+}
+
 function PageEditor({ siteId }: { siteId: string }) {
   const { pageId } = useParams();
   const token = useSession((state) => state.token);
@@ -397,26 +545,53 @@ function PageEditor({ siteId }: { siteId: string }) {
     enabled: Boolean(pageId),
   });
   const site = useQuery({ queryKey: ['site', siteId], queryFn: () => api(`/v1/management/sites/${siteId}`, { token }) });
-  const current = page.data as { id: string; path: string; version: number; document: CanonicalDocument } | undefined;
+  const folders = useQuery({
+    queryKey: ['folders', siteId],
+    queryFn: () => api(`/v1/management/sites/${siteId}/folders`, { token }),
+  });
+  const current = page.data as PageRecord | undefined;
   const [history, setHistory] = useState<HistoryState | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [panel, setPanel] = useState<'page' | 'block'>('page');
+  const [properties, setProperties] = useState<PageProperties | null>(null);
   const document = history?.present;
   useEffect(() => {
     setHistory(null);
     setSelected(null);
+    setPanel('page');
+    setProperties(null);
   }, [pageId]);
   useEffect(() => {
     if (current?.document && !history) setHistory(createHistory(current.document));
   }, [current, history]);
+  useEffect(() => {
+    if (current && !properties) setProperties({ slug: current.slug, path: current.path, folderId: current.folderId });
+  }, [current, properties]);
   const sensors = useSensors(useSensor(PointerSensor));
   const save = useMutation({
-    mutationFn: () =>
-      api(`/v1/management/sites/${siteId}/pages/${pageId}`, {
+    mutationFn: () => {
+      const nextDocument = document ? { ...document, metadata: metadataForSave(document.metadata), locale: document.locale } : document;
+      return api(`/v1/management/sites/${siteId}/pages/${pageId}`, {
         method: 'PATCH',
         token,
-        body: { title: document?.metadata.title, document, expectedVersion: current?.version },
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['page-tree', siteId] }),
+        body: {
+          title: nextDocument?.metadata.title,
+          slug: properties?.slug.trim(),
+          path: properties?.path.trim(),
+          locale: nextDocument?.locale,
+          folderId: properties?.folderId,
+          document: nextDocument,
+          expectedVersion: current?.version,
+        },
+      });
+    },
+    onSuccess: (saved: PageRecord) => {
+      queryClient.setQueryData(['page', siteId, pageId], saved);
+      setProperties({ slug: saved.slug, path: saved.path, folderId: saved.folderId });
+      if (saved.document) setHistory(createHistory(saved.document));
+      queryClient.invalidateQueries({ queryKey: ['page-tree', siteId] });
+      queryClient.invalidateQueries({ queryKey: ['pages', siteId] });
+    },
   });
   const publish = useMutation({
     mutationFn: () => api(`/v1/management/sites/${siteId}/pages/${pageId}/publish`, { method: 'POST', token }),
@@ -440,6 +615,15 @@ function PageEditor({ siteId }: { siteId: string }) {
         <div className="flex gap-2">
           <Button variant="ghost" onClick={() => setHistory(historyUndo(history!))}>Desfazer</Button>
           <Button variant="ghost" onClick={() => setHistory(historyRedo(history!))}>Refazer</Button>
+          <Button
+            variant={panel === 'page' ? 'primary' : 'ghost'}
+            onClick={() => {
+              setPanel('page');
+              setSelected(null);
+            }}
+          >
+            {t('properties', locale)}
+          </Button>
           <Button onClick={() => save.mutate()}>{t('save', locale)}</Button>
           <Button onClick={() => publish.mutate()}>{t('publish', locale)}</Button>
           <a
@@ -452,8 +636,10 @@ function PageEditor({ siteId }: { siteId: string }) {
           </a>
         </div>
       </div>
+      <p className="mb-3 text-sm text-ink/60">{current?.path} · {current?.status}</p>
       <p className="mb-3 text-sm text-ink/60">{t('canvasNote', locale)}</p>
-      <div className="grid gap-3 lg:grid-cols-[220px_1fr_260px]">
+      {save.isError ? <p className="mb-3 text-sm text-clay">{save.error instanceof Error ? save.error.message : 'Não foi possível salvar.'}</p> : null}
+      <div className="grid gap-3 lg:grid-cols-[220px_1fr_320px]">
         <aside className="rounded-3xl border border-line bg-white p-3">
           <h2 className="mb-2 font-serif text-xl">{t('library', locale)}</h2>
           <div className="flex max-h-[32rem] flex-col gap-1 overflow-auto">
@@ -483,16 +669,28 @@ function PageEditor({ siteId }: { siteId: string }) {
               key={node.id}
               type="button"
               className={`mb-2 block w-full rounded-2xl border p-3 text-left ${selected === node.id ? 'border-pine' : 'border-line'}`}
-              onClick={() => setSelected(node.id)}
+              onClick={() => {
+                setSelected(node.id);
+                setPanel('block');
+              }}
             >
               <span className="text-xs uppercase text-ink/50">{node.type === 'block' ? node.name : node.type === 'defaultContent' ? node.element : 'fragmento'}</span>
               <p>{nodeSummary(node)}</p>
             </button>
           ))}
         </div>
-        <aside className="rounded-3xl border border-line bg-white p-3">
-          <h2 className="mb-2 font-serif text-xl">{t('inspector', locale)}</h2>
-          {selectedNode && selectedNode.type !== 'fragmentReference' ? (
+        <aside className="max-h-[40rem] overflow-auto rounded-3xl border border-line bg-white p-3">
+          <h2 className="mb-2 font-serif text-xl">{panel === 'page' ? t('properties', locale) : t('inspector', locale)}</h2>
+          {panel === 'page' && properties && document ? (
+            <PageSettings
+              locale={locale}
+              document={document}
+              properties={properties}
+              folders={(folders.data?.data ?? []) as FolderOption[]}
+              onDocument={(next) => setHistory(commitDocument(history!, next))}
+              onProperties={setProperties}
+            />
+          ) : selectedNode && selectedNode.type !== 'fragmentReference' ? (
             <Inspector
               definition={definitionFor(selectedNode)}
               nodeId={selectedNode.id}
