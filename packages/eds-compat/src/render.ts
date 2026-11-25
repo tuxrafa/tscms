@@ -6,7 +6,16 @@ export interface RenderContext {
   siteKey: string;
   publicBaseUrl: string;
   runtime: 'tscms' | 'adobe';
+  /** Public URL prefix for the site (e.g. `/12pontos`). Empty means site root. */
+  basePath?: string;
   eager?: boolean;
+}
+
+function withBasePath(basePath: string | undefined, assetPath: string): string {
+  const prefix = String(basePath || '').replace(/\/+$/, '');
+  if (!prefix) return assetPath;
+  if (!assetPath.startsWith('/')) return `${prefix}/${assetPath}`;
+  return `${prefix}${assetPath}`;
 }
 
 const allowedEmbedHosts = new Set([
@@ -39,33 +48,39 @@ export function renderPageHtml(document: CanonicalDocument, context: RenderConte
   const structured = meta.structuredData
     ? `<script type="application/ld+json">${JSON.stringify(meta.structuredData).replaceAll('<', '\\u003c')}</script>`
     : '';
-  const nav = meta.nav ?? '/nav';
-  const footer = meta.footer ?? '/footer';
+  const nav = withBasePath(context.basePath, meta.nav ?? '/nav');
+  const footer = withBasePath(context.basePath, meta.footer ?? '/footer');
+  const feedHref = withBasePath(context.basePath, '/feed.xml');
+  const stylesHref = withBasePath(context.basePath, '/styles/styles.css');
   const scripts =
     context.runtime === 'adobe'
-      ? `<script src="/scripts/aem.js" type="module"></script><script src="/scripts/scripts.js" type="module"></script>`
-      : `<script src="/scripts/scripts.js" type="module"></script>`;
-  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="/feed.xml"><link rel="stylesheet" href="/styles/styles.css">${structured}${scripts}</head><body><header></header><main>${renderPlainMain(document, context)}</main><footer></footer></body></html>`;
+      ? `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/aem.js'))}" type="module"></script><script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`
+      : `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`;
+  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="${escapeAttr(feedHref)}"><link rel="stylesheet" href="${escapeAttr(stylesHref)}">${structured}${scripts}</head><body><header></header><main>${renderPlainMain(document, context)}</main><footer></footer></body></html>`;
 }
 
 function renderSection(section: SectionNode, context: RenderContext): string {
   const classes = (section.metadata?.style ?? []).map((item) => sanitizeClass(item));
   const id = section.metadata?.anchorId ? ` id="${escapeAttr(sanitizeAnchor(section.metadata.anchorId))}"` : '';
   const classAttr = classes.length > 0 ? ` class="${classes.join(' ')}"` : '';
-  const children = section.children.map((node, index) => renderNode(node, context, index === 0)).join('');
+  const children = section.children.map((node) => renderNode(node, context)).join('');
   return `<div${classAttr}${id}>${children}</div>`;
 }
 
-function renderNode(node: ContentNode, context: RenderContext, eager: boolean): string {
+function renderNode(node: ContentNode, context: RenderContext): string {
   if (node.type === 'fragmentReference') {
     const path = node.path ?? `/fragments/${node.fragmentId}`;
     return block('fragment', [], `<div><div><p><a href="${escapeAttr(path)}">${escapeHtml(path)}</a></p></div></div>`);
   }
-  if (node.type === 'defaultContent') return renderDefault(node.element, node.data, eager);
-  return renderBlock(node.name, node.variant, node.options, node.data, context, eager);
+  if (node.type === 'defaultContent') return renderDefault(node.element, node.data);
+  return renderBlock(node.name, node.variant, node.options, node.data, context);
 }
 
-function renderDefault(element: string, data: Record<string, unknown>, eager: boolean): string {
+function loadsEager(data: Record<string, unknown>, options?: string[]): boolean {
+  return data.eager === true || options?.includes('eager') === true;
+}
+
+function renderDefault(element: string, data: Record<string, unknown>): string {
   switch (element) {
     case 'heading': {
       const level = clampHeading(data.level);
@@ -75,7 +90,7 @@ function renderDefault(element: string, data: Record<string, unknown>, eager: bo
     case 'text':
       return renderRich(data.body);
     case 'image':
-      return `${renderPicture({ src: stringValue(data.src ?? nested(data.asset, 'src') ?? '/media/image.webp'), alt: stringValue(data.alt) }, eager)}${data.caption ? `<p>${escapeHtml(stringValue(data.caption))}</p>` : ''}`;
+      return `${renderPicture({ src: stringValue(data.src ?? nested(data.asset, 'src') ?? '/media/image.webp'), alt: stringValue(data.alt) }, loadsEager(data))}${data.caption ? `<p>${escapeHtml(stringValue(data.caption))}</p>` : ''}`;
     case 'button':
       return renderButton(data);
     case 'buttonGroup':
@@ -104,11 +119,10 @@ function renderBlock(
   options: string[] | undefined,
   data: Record<string, unknown>,
   context: RenderContext,
-  eager: boolean,
 ): string {
   const classes = classNamesFor(name === 'faq' ? 'accordion' : name, variant, options);
   if (name === 'faq') classes[0] = 'faq';
-  const rows = rowsFor(name, data, context, eager);
+  const rows = rowsFor(name, data, context, loadsEager(data, options));
   return block(classes[0] ?? name, classes.slice(1), rows);
 }
 
@@ -148,7 +162,7 @@ function rowsFor(name: string, data: Record<string, unknown>, context: RenderCon
     case 'logo-cloud':
     case 'gallery':
       return arrayValue(data.cards ?? data.items ?? data.people ?? data.plans ?? data.logos ?? data.images)
-        .map((item) => renderCardRow(item))
+        .map((item) => renderCardRow(item, eager))
         .join('');
     case 'columns':
       return row(
@@ -175,7 +189,12 @@ function rowsFor(name: string, data: Record<string, unknown>, context: RenderCon
         .join('');
     case 'carousel':
     case 'slider':
-      return arrayValue(data.slides).map((item) => renderCardRow(item)).join('');
+      return arrayValue(data.slides).map((item) => renderCardRow(item, eager)).join('');
+    case 'before-after':
+      return row([
+        data.before ? renderPicture(pictureFrom(data.before), eager) : '',
+        data.after ? renderPicture(pictureFrom(data.after), eager) : '',
+      ]);
     case 'video':
       return cell(`<p><a href="${escapeAttr(stringValue(data.src))}">${escapeHtml(stringValue(data.title || data.src))}</a></p>`);
     case 'embed':
@@ -210,9 +229,9 @@ function rowsFor(name: string, data: Record<string, unknown>, context: RenderCon
   }
 }
 
-function renderCardRow(item: unknown): string {
+function renderCardRow(item: unknown, eager: boolean): string {
   const image = isRecord(item) ? item.image ?? (item.src ? item : undefined) : undefined;
-  const picture = image ? renderPicture(pictureFrom(image), false) : '';
+  const picture = image ? renderPicture(pictureFrom(image), eager) : '';
   const title = stringValue(nested(item, 'title') ?? nested(item, 'name') ?? nested(item, 'quote') ?? '');
   const text = stringValue(nested(item, 'text') ?? nested(item, 'role') ?? nested(item, 'author') ?? '');
   const href = nested(item, 'href');

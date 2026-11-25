@@ -6,11 +6,13 @@ import { App } from './App';
 import './styles.css';
 
 const queryClient = new QueryClient();
+const baseUrl = (import.meta as unknown as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
+const basename = baseUrl === '/' ? undefined : baseUrl.replace(/\/$/, '');
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={basename}>
         <App />
       </BrowserRouter>
     </QueryClientProvider>
