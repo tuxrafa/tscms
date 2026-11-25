@@ -1,6 +1,6 @@
 import { classNamesFor } from '@tscms/block-registry';
 import type { CanonicalDocument, ContentNode, RichTextDocument, SectionNode } from '@tscms/content-schema';
-import { escapeAttr, escapeHtml, renderPicture } from './html.js';
+import { assetPictureStyle, escapeAttr, escapeHtml, renderPicture } from './html.js';
 
 export interface RenderContext {
   siteKey: string;
@@ -29,7 +29,8 @@ const allowedEmbedHosts = new Set([
 
 export function renderPlainMain(document: CanonicalDocument, context: RenderContext): string {
   const sections = Object.values(document.slots).flatMap((slot) => slot.sections.map((section) => renderSection(section, context)));
-  return sections.join('');
+  const html = sections.join('');
+  return html.includes('asset-picture') ? `${assetPictureStyle}${html}` : html;
 }
 
 export function renderPageHtml(document: CanonicalDocument, context: RenderContext): string {
