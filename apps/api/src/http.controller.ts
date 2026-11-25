@@ -366,6 +366,12 @@ export class DeliveryController {
   ) {}
 
   @Public()
+  @Get('sites/:siteKey/pages')
+  publishedPages(@Param('siteKey') siteKey: string, @Query('pathPrefix') pathPrefix?: string) {
+    return this.delivery.publishedPages(siteKey, pathPrefix);
+  }
+
+  @Public()
   @Get('sites/:siteKey/pages/by-path')
   async page(
     @Param('siteKey') siteKey: string,

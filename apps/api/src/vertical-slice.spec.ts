@@ -265,6 +265,14 @@ describe('fluxo editorial de ponta a ponta', () => {
     expect(html.body).toContain('Assine a revista');
     expect(html.body).toContain('<h1');
     expect(html.body).not.toContain('data-reactroot');
+    const publishedPages = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages` });
+    expect(publishedPages.statusCode).toBe(200);
+    expect(publishedPages.json().data.some((item: { path: string }) => item.path === '/capa')).toBe(true);
+    expect((await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages?pathPrefix=/blog/` })).json().data.some((item: { path: string }) => item.path === '/capa')).toBe(false);
+    expect((await inject('POST', `/v1/management/sites/${siteId}/pages/${pageId}/unpublish`)).statusCode).toBe(201);
+    const afterUnpublish = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages` });
+    expect(afterUnpublish.json().data.some((item: { path: string }) => item.path === '/capa')).toBe(false);
+    expect((await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages/by-path?path=/capa` })).statusCode).toBe(404);
 
     const draft = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/content/${entryId}` });
     expect(draft.statusCode).toBe(200);
