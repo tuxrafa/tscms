@@ -23,6 +23,7 @@ import StarterKit from '@tiptap/starter-kit';
 import { t } from './i18n';
 import { canonicalToEditor, editorToCanonical, plainRichText } from './rich-text';
 import { AssetPicker, MediaPage } from './assets';
+import { SiteCard, type SiteSummary } from './site-card';
 import { api, useSession } from './session';
 
 const defaultElements: Record<string, DefaultContentNode['element']> = {
@@ -187,11 +188,8 @@ function SitesPage() {
         <Button type="submit">Criar site</Button>
       </form>
       <div className="grid gap-3 md:grid-cols-2">
-        {(sites.data?.data ?? []).map((site: { id: string; name: string; key: string }) => (
-          <Link key={site.id} to={`/sites/${site.id}`} className="rounded-3xl border border-line bg-white p-4">
-            <h2>{site.name}</h2>
-            <p className="text-sm text-ink/60">{site.key}</p>
-          </Link>
+        {(sites.data?.data ?? []).map((site: SiteSummary) => (
+          <SiteCard key={site.id} site={site} />
         ))}
       </div>
     </div>

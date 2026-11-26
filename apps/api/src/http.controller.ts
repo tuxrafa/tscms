@@ -90,6 +90,11 @@ export class TenancyController {
   updateSite(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Body() body: unknown) {
     return this.tenancy.updateSiteConfig(user, siteId, body);
   }
+
+  @Delete('sites/:siteId')
+  deleteSite(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string) {
+    return this.tenancy.deleteSite(user, siteId);
+  }
 }
 
 @ApiTags('content')
