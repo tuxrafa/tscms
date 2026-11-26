@@ -262,6 +262,7 @@ describe('blocos de chrome do site', () => {
               data: {
                 brandMark: '12',
                 brandName: 'Pontos',
+                brandLabel: '12 Pontos',
                 brandHref: '/12pontos/',
                 items: [{ label: 'Início', href: '/12pontos/' }, { label: 'Notícias', href: '/12pontos/blog' }],
                 cta: { label: 'Ouvir o podcast', href: '/12pontos/blog' },
@@ -300,6 +301,7 @@ describe('blocos de chrome do site', () => {
     expect(html).toContain('<footer class="dp-footer">');
     expect(html).toContain('<h4>Navegação</h4><ul><li><a href="/12pontos/">Início</a></li></ul>');
     expect(html).toContain('<span>Privacidade</span>');
+    expect(html).toContain('aria-label="12 Pontos — início"');
     expect(html).not.toContain('<header><header');
     expect(html).not.toContain('<footer><footer');
     expect(html).toContain('action=""');
