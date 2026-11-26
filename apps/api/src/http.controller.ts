@@ -318,6 +318,16 @@ export class ContentController {
     return this.experience.listContentFragments(user, siteId);
   }
 
+  @Get('sites/:siteId/fragments/:fragmentId')
+  getFragment(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('fragmentId') fragmentId: string) {
+    return this.experience.getContentFragment(user, siteId, fragmentId);
+  }
+
+  @Patch('sites/:siteId/fragments/:fragmentId')
+  updateFragment(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('fragmentId') fragmentId: string, @Body() body: unknown) {
+    return this.experience.updateContentFragment(user, siteId, fragmentId, body);
+  }
+
   @Post('sites/:siteId/fragments/:fragmentId/publish')
   publishFragment(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('fragmentId') fragmentId: string) {
     return this.experience.publishContentFragment(user, siteId, fragmentId);
@@ -331,6 +341,16 @@ export class ContentController {
   @Get('sites/:siteId/experience-fragments')
   listExperience(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string) {
     return this.experience.listExperienceFragments(user, siteId);
+  }
+
+  @Get('sites/:siteId/experience-fragments/:fragmentId')
+  getExperience(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('fragmentId') fragmentId: string) {
+    return this.experience.getExperienceFragment(user, siteId, fragmentId);
+  }
+
+  @Patch('sites/:siteId/experience-fragments/:fragmentId')
+  updateExperience(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('fragmentId') fragmentId: string, @Body() body: unknown) {
+    return this.experience.updateExperienceFragment(user, siteId, fragmentId, body);
   }
 
   @Post('sites/:siteId/experience-fragments/:fragmentId/publish')
