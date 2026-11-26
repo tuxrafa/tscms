@@ -16,6 +16,29 @@ export interface CompositionResult {
   issues: string[];
 }
 
+export interface SiteChrome {
+  headerFragmentId?: string;
+  footerFragmentId?: string;
+}
+
+export function applySiteChrome(document: CanonicalDocument, chrome: SiteChrome | undefined): CanonicalDocument {
+  const slots = { ...document.slots };
+  const add = (slotName: 'header' | 'footer', fragmentId: string | undefined) => {
+    if (!fragmentId || slots[slotName]) return;
+    slots[slotName] = {
+      sections: [
+        {
+          id: `site-${slotName}`,
+          children: [{ id: `site-${slotName}-ref`, type: 'fragmentReference', fragmentId, mode: 'linked' }],
+        },
+      ],
+    };
+  };
+  add('header', chrome?.headerFragmentId);
+  add('footer', chrome?.footerFragmentId);
+  return { ...document, slots };
+}
+
 export function compose(input: CompositionInput): CompositionResult {
   const issues: string[] = [];
   let document = input.page;

@@ -33,10 +33,18 @@ const allowedEmbedHosts = new Set([
   'www.vimeo.com',
 ]);
 
+const chromeSlots = new Set(['header', 'footer']);
+
 export function renderPlainMain(document: CanonicalDocument, context: RenderContext): string {
-  const sections = Object.values(document.slots).flatMap((slot) => slot.sections.map((section) => renderSection(section, context)));
-  const html = sections.join('');
+  const html = renderSlots(document, context, (name) => !chromeSlots.has(name));
   return html.includes('asset-picture') ? `${assetPictureStyle}${html}` : html;
+}
+
+function renderSlots(document: CanonicalDocument, context: RenderContext, include: (name: string) => boolean): string {
+  return Object.entries(document.slots)
+    .filter(([name]) => include(name))
+    .flatMap(([, slot]) => slot.sections.map((section) => renderSection(section, context)))
+    .join('');
 }
 
 export function renderPageHtml(document: CanonicalDocument, context: RenderContext): string {
@@ -64,7 +72,7 @@ export function renderPageHtml(document: CanonicalDocument, context: RenderConte
       ? `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/aem.js'))}" type="module"></script><script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`
       : `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`;
   const lcpPreload = portalPerformanceDefaults.images.prioritizeLcp ? lcpPreloadLink(document) : '';
-  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="${escapeAttr(feedHref)}">${lcpPreload}<link rel="stylesheet" href="${escapeAttr(stylesHref)}">${structured}${scripts}</head><body><header></header><main>${renderPlainMain(document, context)}</main><footer></footer></body></html>`;
+  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="${escapeAttr(feedHref)}">${lcpPreload}<link rel="stylesheet" href="${escapeAttr(stylesHref)}">${structured}${scripts}</head><body><header>${renderSlots(document, context, (name) => name === 'header')}</header><main>${renderPlainMain(document, context)}</main><footer>${renderSlots(document, context, (name) => name === 'footer')}</footer></body></html>`;
 }
 
 /** Early LCP discovery: preload the first eager image before render-blocking CSS. */

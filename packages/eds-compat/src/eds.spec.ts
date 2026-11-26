@@ -231,3 +231,18 @@ function decorateAccordion(block: Element) {
     row.replaceWith(details);
   });
 }
+
+describe('header e footer do site', () => {
+  it('renderiza slots header e footer dentro dos elementos de chrome', () => {
+    const document = emptyDocument({ id: 'home', type: 'page', title: 'Home' });
+    document.metadata = { title: 'Home', language: 'pt-BR' };
+    document.slots.header = { sections: [{ id: 'h', children: [{ id: 'hh', type: 'defaultContent', element: 'heading', data: { text: 'Topo', level: 2 } }] }] };
+    document.slots.footer = { sections: [{ id: 'f', children: [{ id: 'ff', type: 'defaultContent', element: 'heading', data: { text: 'Rodapé', level: 2 } }] }] };
+    document.slots.main?.sections[0]?.children.push({ id: 'm', type: 'defaultContent', element: 'heading', data: { text: 'Corpo', level: 1 } });
+    const html = renderPageHtml(document, context);
+    expect(html).toContain('<header><div><h2>Topo</h2></div></header>');
+    expect(html).toContain('<main><div><h1>Corpo</h1></div></main>');
+    expect(html).toContain('<footer><div><h2>Rodapé</h2></div></footer>');
+    expect(renderPlainMain(document, context)).not.toContain('Topo');
+  });
+});

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { emptyDocument } from '@tscms/content-schema';
 import { FragmentCycleError } from '@tscms/fragment-resolver';
-import { compose } from './index.js';
+import { applySiteChrome, compose } from './index.js';
 
 describe('content composer', () => {
   it('resolve fragmento publicado e rejeita ciclo', () => {
@@ -57,5 +57,32 @@ describe('content composer', () => {
         },
       }),
     ).toThrow(FragmentCycleError);
+  });
+});
+
+describe('chrome do site', () => {
+  it('adiciona referências de header e footer sem alterar o main', () => {
+    const page = emptyDocument({ id: 'page', type: 'page', title: 'Home' });
+    const withChrome = applySiteChrome(page, {
+      headerFragmentId: '33333333-3333-4333-8333-333333333333',
+      footerFragmentId: '44444444-4444-4444-8444-444444444444',
+    });
+    expect(withChrome.slots.header?.sections[0]?.children[0]).toMatchObject({
+      type: 'fragmentReference',
+      fragmentId: '33333333-3333-4333-8333-333333333333',
+    });
+    expect(withChrome.slots.footer?.sections[0]?.children[0]).toMatchObject({
+      type: 'fragmentReference',
+      fragmentId: '44444444-4444-4444-8444-444444444444',
+    });
+    expect(withChrome.slots.main).toEqual(page.slots.main);
+  });
+
+  it('preserva slots existentes e não muda o documento sem configuração', () => {
+    const page = emptyDocument({ id: 'page', type: 'page', title: 'Home' });
+    expect(applySiteChrome(page, undefined)).toEqual(page);
+    page.slots.footer = { sections: [{ id: 'own', children: [] }] };
+    const result = applySiteChrome(page, { footerFragmentId: '44444444-4444-4444-8444-444444444444' });
+    expect(result.slots.footer).toEqual({ sections: [{ id: 'own', children: [] }] });
   });
 });

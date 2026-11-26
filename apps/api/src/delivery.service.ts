@@ -17,7 +17,7 @@ import {
   templateRevisions,
   templates,
 } from '@tscms/database';
-import { compose } from '@tscms/content-composer';
+import { applySiteChrome, compose, type SiteChrome } from '@tscms/content-composer';
 import type { CanonicalDocument } from '@tscms/content-schema';
 import type { FragmentLookup } from '@tscms/fragment-resolver';
 import { renderPageHtml, renderPlainMain } from '@tscms/eds-compat';
@@ -26,6 +26,16 @@ import { createHash } from 'node:crypto';
 import { ApiException } from './common.js';
 import { DamService } from './dam.service.js';
 import { DatabaseService } from './database.service.js';
+
+function siteChrome(config: Record<string, unknown>): SiteChrome | undefined {
+  const chrome = config.chrome;
+  if (!chrome || typeof chrome !== 'object') return undefined;
+  const { headerFragmentId, footerFragmentId } = chrome as Record<string, unknown>;
+  return {
+    headerFragmentId: typeof headerFragmentId === 'string' ? headerFragmentId : undefined,
+    footerFragmentId: typeof footerFragmentId === 'string' ? footerFragmentId : undefined,
+  };
+}
 
 @Injectable()
 export class DeliveryService {
@@ -51,7 +61,9 @@ export class DeliveryService {
     const [revision] = await this.database.db.select().from(pageRevisions).where(eq(pageRevisions.id, page.publishedRevisionId)).limit(1);
     if (!revision) throw new ApiException(404, 'not_found', 'Revisão publicada não encontrada.');
     const templateDefinition = page.templateId ? await this.publishedTemplate(page.templateId) : undefined;
-    const composed = this.composePage(site.id, await this.hydrateAssets(site.key, revision.document), templateDefinition);
+    const chrome = siteChrome((site.config ?? {}) as Record<string, unknown>);
+    const hydrated = await this.hydrateAssets(site.key, revision.document);
+    const composed = this.composePage(site.id, applySiteChrome(hydrated, chrome), templateDefinition);
     if (composed.issues.length > 0) {
       throw new ApiException(409, 'composition', 'A página publicada não pôde ser composta.', composed.issues.map((message) => ({ path: 'document', message })));
     }
