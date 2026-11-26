@@ -284,6 +284,10 @@ function SiteArea() {
         <Route path="/models" element={<ModelsPage siteId={siteId!} />} />
         <Route path="/templates" element={<TemplatesPage siteId={siteId!} />} />
         <Route path="/fragments" element={<FragmentsPage siteId={siteId!} />} />
+        <Route path="/fragments/content/new" element={<ContentFragmentEditor siteId={siteId!} />} />
+        <Route path="/fragments/content/:fragmentId" element={<ContentFragmentEditor siteId={siteId!} />} />
+        <Route path="/fragments/experience/new" element={<ExperienceFragmentEditor siteId={siteId!} />} />
+        <Route path="/fragments/experience/:fragmentId" element={<ExperienceFragmentEditor siteId={siteId!} />} />
         <Route path="/polls" element={<PollsPage siteId={siteId!} />} />
         <Route path="/media" element={<MediaPage siteId={siteId!} />} />
       </Routes>
@@ -983,21 +987,510 @@ function TemplatesPage({ siteId }: { siteId: string }) {
   );
 }
 
+function statusLabel(status: string) {
+  if (status === 'draft') return 'rascunho';
+  if (status === 'published') return 'publicado';
+  if (status === 'in_review') return 'em revisão';
+  if (status === 'archived') return 'arquivado';
+  return status;
+}
+
 function FragmentsPage({ siteId }: { siteId: string }) {
   const token = useSession((state) => state.token);
-  const fragments = useQuery({
-    queryKey: ['fragments', siteId],
+  const content = useQuery({
+    queryKey: ['content-fragments', siteId],
+    queryFn: () => api(`/v1/management/sites/${siteId}/fragments`, { token }),
+  });
+  const experience = useQuery({
+    queryKey: ['experience-fragments', siteId],
     queryFn: () => api(`/v1/management/sites/${siteId}/experience-fragments`, { token }),
   });
+  const contentRows = (content.data?.data ?? []) as Array<{ id: string; title: string; slug: string; status: string }>;
+  const experienceRows = (experience.data?.data ?? []) as Array<{ id: string; title: string; path: string; status: string }>;
   return (
-    <div>
-      <h1 className="mb-4 text-4xl">Fragmentos de experiência</h1>
-      <ul>
-        {(fragments.data?.data ?? []).map((fragment: { id: string; title: string; path: string }) => (
-          <li key={fragment.id}>{fragment.title} · {fragment.path}</li>
-        ))}
-      </ul>
+    <div className="flex flex-col gap-8">
+      <section>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-4xl">Fragmentos de conteúdo</h1>
+          <Link className="rounded-full bg-white px-4 py-2 text-sm" to={`/sites/${siteId}/fragments/content/new`}>Novo</Link>
+        </div>
+        <p className="mb-3 max-w-2xl text-sm text-ink/70">Dados estruturados, no formato de um modelo. O mesmo fragmento pode ser reutilizado em várias páginas.</p>
+        {contentRows.length === 0 ? <p className="text-sm text-ink/60">Nenhum fragmento de conteúdo.</p> : (
+          <ul className="flex flex-col gap-2">
+            {contentRows.map((fragment) => (
+              <li key={fragment.id}>
+                <Link className="rounded-2xl bg-white px-3 py-2" to={`/sites/${siteId}/fragments/content/${fragment.id}`}>
+                  {fragment.title} · {fragment.slug} · {statusLabel(fragment.status)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-4xl">Fragmentos de experiência</h1>
+          <Link className="rounded-full bg-white px-4 py-2 text-sm" to={`/sites/${siteId}/fragments/experience/new`}>Novo</Link>
+        </div>
+        <p className="mb-3 max-w-2xl text-sm text-ink/70">Blocos visuais reutilizáveis. A apresentação final continua no site que consome o fragmento.</p>
+        {experienceRows.length === 0 ? <p className="text-sm text-ink/60">Nenhum fragmento de experiência.</p> : (
+          <ul className="flex flex-col gap-2">
+            {experienceRows.map((fragment) => (
+              <li key={fragment.id}>
+                <Link className="rounded-2xl bg-white px-3 py-2" to={`/sites/${siteId}/fragments/experience/${fragment.id}`}>
+                  {fragment.title} · {fragment.path} · {statusLabel(fragment.status)}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
+  );
+}
+
+type ContentModel = { id: string; label: string; name: string; definition: { fields: FieldDefinition[] } };
+
+function ContentFragmentEditor({ siteId }: { siteId: string }) {
+  const { fragmentId } = useParams();
+  const navigate = useNavigate();
+  const token = useSession((state) => state.token);
+  const queryClient = useQueryClient();
+  const fragment = useQuery({
+    queryKey: ['content-fragment', siteId, fragmentId],
+    enabled: Boolean(fragmentId),
+    queryFn: () => api(`/v1/management/sites/${siteId}/fragments/${fragmentId}`, { token }),
+  });
+  const types = useQuery({
+    queryKey: ['types', siteId],
+    queryFn: () => api(`/v1/management/sites/${siteId}/content-types`, { token }),
+  });
+  const loaded = useRef<string | null>(null);
+  const [title, setTitle] = useState('');
+  const [contentTypeId, setContentTypeId] = useState('');
+  const [data, setData] = useState<Record<string, unknown>>({});
+  const [rawData, setRawData] = useState('{}');
+  const [version, setVersion] = useState<number | null>(null);
+  const [status, setStatus] = useState('draft');
+  const [notice, setNotice] = useState('');
+  const models = (types.data?.data ?? []) as ContentModel[];
+  const fields = models.find((model) => model.id === contentTypeId)?.definition.fields ?? [];
+
+  useEffect(() => {
+    const key = fragmentId ?? 'new';
+    if (loaded.current === key) return;
+    if (!fragmentId) {
+      setTitle('');
+      setContentTypeId('');
+      setData({});
+      setRawData('{}');
+      setVersion(null);
+      setStatus('draft');
+      setNotice('');
+      loaded.current = key;
+      return;
+    }
+    if (!fragment.data) return;
+    const row = fragment.data as { title: string; contentTypeId: string | null; data: Record<string, unknown>; version: number; status: string };
+    setTitle(row.title);
+    setContentTypeId(row.contentTypeId ?? '');
+    setData(row.data ?? {});
+    setRawData(JSON.stringify(row.data ?? {}, null, 2));
+    setVersion(row.version);
+    setStatus(row.status);
+    setNotice('');
+    loaded.current = key;
+  }, [fragment.data, fragmentId]);
+
+  function payloadData() {
+    if (!contentTypeId) {
+      const parsed = JSON.parse(rawData) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Os dados precisam ser um objeto JSON.');
+      return parsed as Record<string, unknown>;
+    }
+    const next: Record<string, unknown> = {};
+    for (const field of fields) {
+      if (data[field.name] !== undefined) next[field.name] = data[field.name];
+      if (field.name === 'title' && field.type === 'text' && (next.title === undefined || next.title === '') && title) next.title = title;
+      if (field.type === 'richtext' && (next[field.name] === undefined || next[field.name] === '')) {
+        next[field.name] = { type: 'doc', content: [{ type: 'paragraph', children: [] }] };
+      }
+      if (field.type === 'boolean' && next[field.name] === undefined) next[field.name] = false;
+    }
+    return next;
+  }
+
+  const save = useMutation({
+    mutationFn: () => {
+      let data: Record<string, unknown>;
+      try {
+        data = payloadData();
+      } catch (error) {
+        throw new Error(error instanceof SyntaxError ? 'Os dados precisam ser um objeto JSON.' : error instanceof Error ? error.message : 'Dados inválidos.');
+      }
+      const body = {
+        title,
+        contentTypeId: contentTypeId || null,
+        data,
+        expectedVersion: version ?? undefined,
+      };
+      if (!fragmentId) {
+        return api(`/v1/management/sites/${siteId}/fragments`, {
+          method: 'POST',
+          token,
+          body: { title, contentTypeId: contentTypeId || undefined, data: body.data },
+        });
+      }
+      return api(`/v1/management/sites/${siteId}/fragments/${fragmentId}`, { method: 'PATCH', token, body });
+    },
+    onSuccess: (saved: { id: string; version: number; status: string; slug: string }) => {
+      setVersion(saved.version);
+      setStatus(saved.status);
+      setNotice('Fragmento salvo.');
+      queryClient.invalidateQueries({ queryKey: ['content-fragments', siteId] });
+      if (!fragmentId) {
+        loaded.current = saved.id;
+        navigate(`/sites/${siteId}/fragments/content/${saved.id}`, { replace: true });
+      }
+    },
+    onError: (error: Error) => setNotice(error.message),
+  });
+  const publish = useMutation({
+    mutationFn: () => api(`/v1/management/sites/${siteId}/fragments/${fragmentId}/publish`, { method: 'POST', token }),
+    onSuccess: (saved: { status: string }) => {
+      setStatus(saved.status);
+      setNotice('Fragmento publicado.');
+      queryClient.invalidateQueries({ queryKey: ['content-fragments', siteId] });
+    },
+    onError: (error: Error) => setNotice(error.message),
+  });
+
+  if (fragmentId && fragment.isError) return <p>Não foi possível abrir este fragmento.</p>;
+  if (fragmentId && loaded.current !== fragmentId) return <p>Carregando o fragmento…</p>;
+  return (
+    <form
+      className="flex max-w-3xl flex-col gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setNotice('');
+        save.mutate();
+      }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-4xl">{fragmentId ? title || 'Fragmento de conteúdo' : 'Novo fragmento de conteúdo'}</h1>
+        <div className="flex gap-2">
+          <Link className="rounded-full bg-white px-4 py-2 text-sm" to={`/sites/${siteId}/fragments`}>Voltar</Link>
+          <Button type="submit" disabled={save.isPending}>{t('save', 'pt-BR')}</Button>
+          <Button type="button" disabled={!fragmentId || publish.isPending} onClick={() => publish.mutate()}>{t('publish', 'pt-BR')}</Button>
+        </div>
+      </div>
+      <p className="text-sm text-ink/60">{statusLabel(status)}</p>
+      {notice ? <p className="text-sm">{notice}</p> : null}
+      <Field label="Título">
+        <TextInput value={title} onChange={(event) => setTitle(event.target.value)} required />
+      </Field>
+      <Field label="Modelo">
+        <select
+          className="rounded-xl border border-line bg-white px-3 py-2"
+          value={contentTypeId}
+          onChange={(event) => setContentTypeId(event.target.value)}
+        >
+          <option value="">Sem modelo</option>
+          {models.map((model) => (
+            <option key={model.id} value={model.id}>{model.label}</option>
+          ))}
+        </select>
+      </Field>
+      {contentTypeId ? (
+        <ContentFields key={contentTypeId} fields={fields} data={data} onChange={setData} />
+      ) : (
+        <Field label="Dados">
+          <textarea
+            className="min-h-40 w-full rounded-xl border border-line bg-white px-3 py-2 font-mono text-sm"
+            value={rawData}
+            onChange={(event) => setRawData(event.target.value)}
+          />
+        </Field>
+      )}
+    </form>
+  );
+}
+
+function ContentFields({
+  fields,
+  data,
+  onChange,
+}: {
+  fields: FieldDefinition[];
+  data: Record<string, unknown>;
+  onChange: (data: Record<string, unknown>) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {fields.map((field) => (
+        <ContentFieldInput key={field.name} field={field} value={data[field.name]} onChange={(value) => onChange({ ...data, [field.name]: value })} />
+      ))}
+    </div>
+  );
+}
+
+function ContentFieldInput({ field, value, onChange }: { field: FieldDefinition; value: unknown; onChange: (value: unknown) => void }) {
+  const label = field.label ?? field.name;
+  if (field.type === 'boolean') {
+    return <BooleanOption field={field} checked={value === true} onChange={onChange} />;
+  }
+  if (field.type === 'richtext') {
+    return <RichTextField label={label} value={value} onChange={onChange} />;
+  }
+  if (field.type === 'enum') {
+    return (
+      <Field label={label}>
+        <select className="rounded-xl border border-line bg-white px-3 py-2" value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)}>
+          <option value="">{field.required ? 'Escolha' : 'Nenhum'}</option>
+          {(field.enumValues ?? []).map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      </Field>
+    );
+  }
+  if (field.type === 'integer' || field.type === 'decimal') {
+    return (
+      <Field label={label}>
+        <TextInput
+          type="number"
+          step={field.type === 'integer' ? 1 : 'any'}
+          value={typeof value === 'number' ? String(value) : ''}
+          onChange={(event) => onChange(event.target.value === '' ? '' : Number(event.target.value))}
+          required={field.required}
+        />
+      </Field>
+    );
+  }
+  if (field.type === 'text' || field.type === 'url' || field.type === 'email' || field.type === 'date' || field.type === 'datetime') {
+    const inputType = field.type === 'email' ? 'email' : field.type === 'url' ? 'url' : field.type === 'date' ? 'date' : field.type === 'datetime' ? 'datetime-local' : 'text';
+    return (
+      <Field label={label}>
+        <TextInput type={inputType} value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)} required={field.required} />
+      </Field>
+    );
+  }
+  if (field.type === 'object' && field.fields) {
+    const record = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+    return (
+      <Panel title={label}>
+        <ContentFields fields={field.fields} data={record} onChange={onChange} />
+      </Panel>
+    );
+  }
+  return <JsonValueField label={label} value={value} onChange={onChange} />;
+}
+
+function JsonValueField({ label, value, onChange }: { label: string; value: unknown; onChange: (value: unknown) => void }) {
+  const [text, setText] = useState(() => JSON.stringify(value ?? null, null, 2));
+  const [error, setError] = useState('');
+  return (
+    <Field label={label}>
+      <textarea
+        className="min-h-24 w-full rounded-xl border border-line bg-white px-3 py-2 font-mono text-sm"
+        value={text}
+        onChange={(event) => {
+          setText(event.target.value);
+          try {
+            onChange(JSON.parse(event.target.value));
+            setError('');
+          } catch {
+            setError('JSON inválido.');
+          }
+        }}
+      />
+      {error ? <p className="text-sm text-clay">{error}</p> : null}
+    </Field>
+  );
+}
+
+function ExperienceFragmentEditor({ siteId }: { siteId: string }) {
+  const { fragmentId } = useParams();
+  const navigate = useNavigate();
+  const token = useSession((state) => state.token);
+  const locale = useSession((state) => state.locale);
+  const queryClient = useQueryClient();
+  const fragment = useQuery({
+    queryKey: ['experience-fragment', siteId, fragmentId],
+    enabled: Boolean(fragmentId),
+    queryFn: () => api(`/v1/management/sites/${siteId}/experience-fragments/${fragmentId}`, { token }),
+  });
+  const [history, setHistory] = useState<HistoryState | null>(null);
+  const [title, setTitle] = useState('Novo fragmento');
+  const [path, setPath] = useState('');
+  const [version, setVersion] = useState<number | null>(null);
+  const [status, setStatus] = useState('draft');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
+  const loadedId = useRef<string | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor));
+
+  useEffect(() => {
+    if (!fragmentId) {
+      if (loadedId.current === 'new') return;
+      loadedId.current = 'new';
+      setSelected(null);
+      setNotice('');
+      setHistory(createHistory(emptyDocument({ id: 'novo', type: 'experienceFragment', title: 'Novo fragmento' })));
+      setTitle('Novo fragmento');
+      setPath('');
+      setVersion(null);
+      setStatus('draft');
+      return;
+    }
+    const row = fragment.data as { id: string; title: string; path: string; version: number; status: string; document: CanonicalDocument } | undefined;
+    if (!row || row.id !== fragmentId || loadedId.current === fragmentId) return;
+    loadedId.current = fragmentId;
+    setSelected(null);
+    setNotice('');
+    setTitle(row.title);
+    setPath(row.path);
+    setVersion(row.version);
+    setStatus(row.status);
+    setHistory(createHistory(row.document));
+  }, [fragment.data, fragmentId]);
+
+  const save = useMutation({
+    mutationFn: () => {
+      if (!history) throw new Error('Fragmento ainda não carregou.');
+      const document = { ...history.present, metadata: { ...history.present.metadata, title } };
+      if (!fragmentId) {
+        return api(`/v1/management/sites/${siteId}/experience-fragments`, {
+          method: 'POST',
+          token,
+          body: { title, path: path || undefined, document },
+        });
+      }
+      return api(`/v1/management/sites/${siteId}/experience-fragments/${fragmentId}`, {
+        method: 'PATCH',
+        token,
+        body: { title, path: path || undefined, document, expectedVersion: version ?? undefined },
+      });
+    },
+    onSuccess: (saved: { id: string; title: string; path: string; version: number; status: string; document: CanonicalDocument }) => {
+      setTitle(saved.title);
+      setPath(saved.path);
+      setVersion(saved.version);
+      setStatus(saved.status);
+      setHistory(createHistory(saved.document));
+      setNotice('Fragmento salvo.');
+      loadedId.current = saved.id;
+      queryClient.invalidateQueries({ queryKey: ['experience-fragments', siteId] });
+      if (!fragmentId) navigate(`/sites/${siteId}/fragments/experience/${saved.id}`, { replace: true });
+    },
+    onError: (error: Error) => setNotice(error.message),
+  });
+  const publish = useMutation({
+    mutationFn: () => api(`/v1/management/sites/${siteId}/experience-fragments/${fragmentId}/publish`, { method: 'POST', token }),
+    onSuccess: (saved: { status: string }) => {
+      setStatus(saved.status);
+      setNotice('Fragmento publicado.');
+      queryClient.invalidateQueries({ queryKey: ['experience-fragments', siteId] });
+    },
+    onError: (error: Error) => setNotice(error.message),
+  });
+
+  if (fragmentId && fragment.isError) return <p>Não foi possível abrir este fragmento.</p>;
+  if (!history) return <p>Carregando o fragmento…</p>;
+  const section = history.present.slots.main?.sections[0];
+  const selectedNode = section?.children.find((node) => node.id === selected);
+  return (
+    <DndContext
+      sensors={sensors}
+      onDragEnd={(event) => {
+        const blockName = String(event.active.id).replace(/^library:/, '');
+        const definition = componentCatalog.find((item) => item.name === blockName);
+        if (!definition || !section) return;
+        setHistory(historyCommit(history, { type: 'insert', sectionId: section.id, node: nodeFromCatalog(definition) }));
+      }}
+    >
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-3xl">{title}</h1>
+        <div className="flex gap-2">
+          <Link className="rounded-full bg-white px-4 py-2 text-sm" to={`/sites/${siteId}/fragments`}>Voltar</Link>
+          <Button variant="ghost" onClick={() => setHistory(historyUndo(history))}>Desfazer</Button>
+          <Button variant="ghost" onClick={() => setHistory(historyRedo(history))}>Refazer</Button>
+          <Button
+            variant={selected ? 'ghost' : 'primary'}
+            onClick={() => setSelected(null)}
+          >
+            {t('properties', locale)}
+          </Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending}>{t('save', locale)}</Button>
+          <Button onClick={() => publish.mutate()} disabled={!fragmentId || publish.isPending}>{t('publish', locale)}</Button>
+        </div>
+      </div>
+      <p className="mb-3 text-sm text-ink/60">{path || 'O caminho é definido ao salvar.'} · {statusLabel(status)}</p>
+      <p className="mb-3 text-sm text-ink/60">{t('canvasNote', locale)}</p>
+      {notice ? <p className="mb-3 text-sm">{notice}</p> : null}
+      <div className="grid gap-3 lg:grid-cols-[220px_1fr_320px]">
+        <aside className="rounded-3xl border border-line bg-white p-3">
+          <h2 className="mb-2 font-serif text-xl">{t('library', locale)}</h2>
+          <div className="flex max-h-[32rem] flex-col gap-1 overflow-auto">
+            {componentCatalog.map((item) => (
+              <LibraryButton
+                key={item.name}
+                item={item}
+                onInsert={() => {
+                  if (!section) return;
+                  setHistory(historyCommit(history, { type: 'insert', sectionId: section.id, node: nodeFromCatalog(item) }));
+                }}
+              />
+            ))}
+          </div>
+        </aside>
+        <div
+          className="min-h-96 rounded-3xl border border-dashed border-line bg-white p-4"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            const definition = componentCatalog.find((item) => item.name === event.dataTransfer.getData('text/plain'));
+            if (!definition || !section) return;
+            setHistory(historyCommit(history, { type: 'insert', sectionId: section.id, node: nodeFromCatalog(definition) }));
+          }}
+        >
+          {section?.children.map((node) => (
+            <button
+              key={node.id}
+              type="button"
+              className={`mb-2 block w-full rounded-2xl border p-3 text-left ${selected === node.id ? 'border-pine' : 'border-line'}`}
+              onClick={() => setSelected(node.id)}
+            >
+              <span className="text-xs uppercase text-ink/50">{node.type === 'block' ? node.name : node.type === 'defaultContent' ? node.element : 'fragmento'}</span>
+              <p>{nodeSummary(node)}</p>
+            </button>
+          ))}
+        </div>
+        <aside className="max-h-[40rem] overflow-auto rounded-3xl border border-line bg-white p-3">
+          <h2 className="mb-2 font-serif text-xl">{selectedNode ? t('inspector', locale) : t('properties', locale)}</h2>
+          {selectedNode && selectedNode.type !== 'fragmentReference' ? (
+            <Inspector
+              siteId={siteId}
+              definition={definitionFor(selectedNode)}
+              nodeId={selectedNode.id}
+              value={selectedNode.data}
+              onChange={(data) =>
+                setHistory(historyCommit(history, { type: 'update', sectionId: section?.id, nodeId: selectedNode.id, patch: { data } }))
+              }
+            />
+          ) : (
+            <div className="flex flex-col gap-3">
+              <Field label={t('pageTitle', locale)}>
+                <TextInput value={title} onChange={(event) => setTitle(event.target.value)} required />
+              </Field>
+              <Field label={t('path', locale)}>
+                <TextInput value={path} onChange={(event) => setPath(event.target.value)} placeholder="/fragments/nome" />
+              </Field>
+              <p className="text-sm text-ink/60">Selecione um bloco para editar o conteúdo dele.</p>
+            </div>
+          )}
+        </aside>
+      </div>
+    </DndContext>
   );
 }
 

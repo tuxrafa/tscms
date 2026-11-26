@@ -132,8 +132,56 @@ describe('fluxo editorial de ponta a ponta', () => {
       },
     });
     expect(fragment.statusCode).toBe(201);
+    const fragmentEdited = await inject('PATCH', `/v1/management/sites/${siteId}/experience-fragments/${fragment.json().id}`, {
+      title: 'Chamada atualizada',
+      expectedVersion: fragment.json().version,
+      document: {
+        ...fragment.json().document,
+        metadata: { ...fragment.json().document.metadata, title: 'Chamada atualizada' },
+      },
+    });
+    expect(fragmentEdited.statusCode).toBe(200);
+    expect(fragmentEdited.json().title).toBe('Chamada atualizada');
+    expect(fragmentEdited.json().document.metadata.title).toBe('Chamada atualizada');
+    expect(fragmentEdited.json().version).toBe(fragment.json().version + 1);
     const fragmentPublished = await inject('POST', `/v1/management/sites/${siteId}/experience-fragments/${fragment.json().id}/publish`);
     expect(fragmentPublished.statusCode).toBe(201);
+
+    const contentFragment = await inject('POST', `/v1/management/sites/${siteId}/fragments`, {
+      title: 'Citação',
+      contentTypeId: typeId,
+      data: {
+        title: 'Citação',
+        body: { type: 'doc', content: [{ type: 'paragraph', children: [{ type: 'text', text: 'Uma frase.' }] }] },
+      },
+    });
+    expect(contentFragment.statusCode).toBe(201);
+    const contentOpened = await inject('GET', `/v1/management/sites/${siteId}/fragments/${contentFragment.json().id}`);
+    expect(contentOpened.statusCode).toBe(200);
+    expect(contentOpened.json().title).toBe('Citação');
+    const contentEdited = await inject('PATCH', `/v1/management/sites/${siteId}/fragments/${contentFragment.json().id}`, {
+      title: 'Citação revista',
+      data: {
+        title: 'Citação revista',
+        excerpt: 'Nova',
+        body: { type: 'doc', content: [{ type: 'paragraph', children: [{ type: 'text', text: 'Outra frase.' }] }] },
+      },
+      expectedVersion: contentFragment.json().version,
+    });
+    expect(contentEdited.statusCode).toBe(200);
+    expect(contentEdited.json().data.excerpt).toBe('Nova');
+    expect(contentEdited.json().version).toBe(contentFragment.json().version + 1);
+    const staleFragment = await inject('PATCH', `/v1/management/sites/${siteId}/fragments/${contentFragment.json().id}`, {
+      title: 'Outra',
+      data: contentEdited.json().data,
+      expectedVersion: contentFragment.json().version,
+    });
+    expect(staleFragment.statusCode).toBe(409);
+    const invalidFragment = await inject('PATCH', `/v1/management/sites/${siteId}/fragments/${contentFragment.json().id}`, {
+      data: { title: 'Sem corpo' },
+      expectedVersion: contentEdited.json().version,
+    });
+    expect(invalidFragment.statusCode).toBe(400);
 
     const blueprints = await inject('POST', `/v1/management/sites/${siteId}/templates/blueprints`);
     const articleTemplate = blueprints.json().data.find((item: { key: string }) => item.key === 'article');

@@ -4,6 +4,7 @@ import {
   auditEvents,
   contentFragments,
   contentFragmentRevisions,
+  contentTypes,
   experienceFragmentRevisions,
   experienceFragments,
   folders,
@@ -22,7 +23,7 @@ import {
   type EditableTemplate,
   type EditorialStatus,
 } from '@tscms/content-schema';
-import { assertTransition, slugify } from '@tscms/core-domain';
+import { assertTransition, slugify, validateEntryData } from '@tscms/core-domain';
 import { blueprintTemplates } from '@tscms/template-engine';
 import { z } from 'zod';
 import { AccessService } from './access.service.js';
@@ -504,10 +505,10 @@ export class ExperienceService {
   }
 
   async createContentFragment(user: AuthUser, siteId: string, input: unknown) {
-    const site = await this.access.requireSite(user.id, siteId, 'content:write');
+    const site = await this.allowFragment(user, siteId, 'fragments.create');
     const body = parseInput(
       z.object({
-        title: z.string(),
+        title: z.string().min(1),
         slug: z.string().optional(),
         locale: z.string().default('pt-BR'),
         contentTypeId: z.string().uuid().optional(),
@@ -515,10 +516,17 @@ export class ExperienceService {
       }),
       input,
     );
-    const [fragment] = await this.database.db
-      .insert(contentFragments)
-      .values({ siteId, title: body.title, slug: slugify(body.slug ?? body.title), locale: body.locale, contentTypeId: body.contentTypeId, data: body.data })
-      .returning();
+    if (body.contentTypeId) await this.assertFragmentData(siteId, body.contentTypeId, body.data);
+    let fragment;
+    try {
+      [fragment] = await this.database.db
+        .insert(contentFragments)
+        .values({ siteId, title: body.title, slug: this.fragmentSlug(body.slug ?? body.title), locale: body.locale, contentTypeId: body.contentTypeId, data: body.data })
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ApiException(409, 'conflict', 'Já existe um fragmento com esse slug.');
+      throw error;
+    }
     await this.access.audit(this.database.db, {
       organizationId: site.organizationId,
       siteId,
@@ -530,8 +538,67 @@ export class ExperienceService {
     return fragment;
   }
 
+  async getContentFragment(user: AuthUser, siteId: string, fragmentId: string) {
+    await this.allowFragment(user, siteId, 'fragments.read');
+    return this.mustContentFragment(siteId, fragmentId);
+  }
+
+  async updateContentFragment(user: AuthUser, siteId: string, fragmentId: string, input: unknown) {
+    const site = await this.allowFragment(user, siteId, 'fragments.edit');
+    const body = parseInput(
+      z.object({
+        title: z.string().min(1).optional(),
+        slug: z.string().optional(),
+        contentTypeId: z.string().uuid().nullable().optional(),
+        data: z.record(z.unknown()).optional(),
+        expectedVersion: z.number().int().positive().optional(),
+      }),
+      input,
+    );
+    const current = await this.mustContentFragment(siteId, fragmentId);
+    if (body.expectedVersion && body.expectedVersion !== current.version) {
+      throw new ApiException(409, 'conflict', 'O fragmento foi alterado por outra pessoa.');
+    }
+    const touches = body.title !== undefined || body.slug !== undefined || body.data !== undefined || body.contentTypeId !== undefined;
+    if (!touches) return current;
+    const contentTypeId = body.contentTypeId === undefined ? current.contentTypeId : body.contentTypeId;
+    const data = body.data ?? current.data;
+    if (contentTypeId) await this.assertFragmentData(siteId, contentTypeId, data);
+    const slug = body.slug === undefined ? current.slug : this.fragmentSlug(body.slug);
+    let updated;
+    try {
+      [updated] = await this.database.db
+        .update(contentFragments)
+        .set({
+          title: body.title ?? current.title,
+          slug,
+          contentTypeId,
+          data,
+          version: current.version + 1,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(contentFragments.id, fragmentId), eq(contentFragments.version, current.version)))
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ApiException(409, 'conflict', 'Já existe um fragmento com esse slug.');
+      throw error;
+    }
+    if (!updated) throw new ApiException(409, 'conflict', 'O fragmento foi alterado por outra pessoa.');
+    await this.access.audit(this.database.db, {
+      organizationId: site.organizationId,
+      siteId,
+      actorId: user.id,
+      actorType: this.actorType(user),
+      action: 'content_fragment.updated',
+      entityType: 'content_fragment',
+      entityId: fragmentId,
+      metadata: { versionBefore: current.version, versionAfter: updated.version },
+    });
+    return updated;
+  }
+
   async publishContentFragment(user: AuthUser, siteId: string, fragmentId: string) {
-    const site = await this.access.requireSite(user.id, siteId, 'content:publish');
+    const site = await this.allowFragment(user, siteId, 'fragments.publish');
     return this.database.db.transaction(async (tx) => {
       const [current] = await tx.select().from(contentFragments).where(and(eq(contentFragments.id, fragmentId), eq(contentFragments.siteId, siteId))).limit(1);
       if (!current) throw new ApiException(404, 'not_found', 'Fragmento não encontrado.');
@@ -557,30 +624,40 @@ export class ExperienceService {
   }
 
   async listContentFragments(user: AuthUser, siteId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
+    await this.allowFragment(user, siteId, 'fragments.read');
     return { data: await this.database.db.select().from(contentFragments).where(and(eq(contentFragments.siteId, siteId), isNull(contentFragments.deletedAt))) };
   }
 
   async createExperienceFragment(user: AuthUser, siteId: string, input: unknown) {
-    const site = await this.access.requireSite(user.id, siteId, 'content:write');
+    const site = await this.allowFragment(user, siteId, 'fragments.create');
     const body = parseInput(
       z.object({
-        title: z.string(),
+        title: z.string().min(1),
         slug: z.string().optional(),
-        path: z.string().optional(),
+        path: z.string().regex(/^\/[a-z0-9/-]*$/).optional(),
         locale: z.string().default('pt-BR'),
         variation: z.string().default('default'),
         document: canonicalDocumentSchema.optional(),
       }),
       input,
     );
-    const slug = slugify(body.slug ?? body.title);
+    if (body.document && body.document.type !== 'experienceFragment') {
+      throw new ApiException(400, 'validation_error', 'O documento precisa ser um fragmento de experiência.');
+    }
+    const slug = this.fragmentSlug(body.slug ?? body.title);
     const path = body.path ?? `/fragments/${slug}`;
-    const document = body.document ?? emptyDocument({ id: slug, type: 'experienceFragment', title: body.title, locale: body.locale });
-    const [fragment] = await this.database.db
-      .insert(experienceFragments)
-      .values({ siteId, title: body.title, slug, path, locale: body.locale, variation: body.variation, document })
-      .returning();
+    const drafted = body.document ?? emptyDocument({ id: slug, type: 'experienceFragment', title: body.title, locale: body.locale });
+    const document = drafted.metadata.title === body.title ? drafted : { ...drafted, metadata: { ...drafted.metadata, title: body.title } };
+    let fragment;
+    try {
+      [fragment] = await this.database.db
+        .insert(experienceFragments)
+        .values({ siteId, title: body.title, slug, path, locale: body.locale, variation: body.variation, document })
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ApiException(409, 'conflict', 'Já existe um fragmento nesse caminho.');
+      throw error;
+    }
     await this.access.audit(this.database.db, {
       organizationId: site.organizationId,
       siteId,
@@ -592,8 +669,65 @@ export class ExperienceService {
     return fragment;
   }
 
+  async getExperienceFragment(user: AuthUser, siteId: string, fragmentId: string) {
+    await this.allowFragment(user, siteId, 'fragments.read');
+    return this.mustExperienceFragment(siteId, fragmentId);
+  }
+
+  async updateExperienceFragment(user: AuthUser, siteId: string, fragmentId: string, input: unknown) {
+    const site = await this.allowFragment(user, siteId, 'fragments.edit');
+    const body = parseInput(
+      z.object({
+        title: z.string().min(1).optional(),
+        slug: z.string().optional(),
+        path: z.string().regex(/^\/[a-z0-9/-]*$/).optional(),
+        document: canonicalDocumentSchema.optional(),
+        expectedVersion: z.number().int().positive().optional(),
+      }),
+      input,
+    );
+    const current = await this.mustExperienceFragment(siteId, fragmentId);
+    if (body.expectedVersion && body.expectedVersion !== current.version) {
+      throw new ApiException(409, 'conflict', 'O fragmento foi alterado por outra pessoa.');
+    }
+    if (body.document && body.document.type !== 'experienceFragment') {
+      throw new ApiException(400, 'validation_error', 'O documento precisa ser um fragmento de experiência.');
+    }
+    const touches = body.title !== undefined || body.slug !== undefined || body.path !== undefined || body.document !== undefined;
+    if (!touches) return current;
+    const title = body.title ?? current.title;
+    const slug = body.slug === undefined ? current.slug : this.fragmentSlug(body.slug);
+    const path = body.path ?? current.path;
+    const source = body.document ?? current.document;
+    const document = source.metadata.title === title ? source : { ...source, metadata: { ...source.metadata, title } };
+    let updated;
+    try {
+      [updated] = await this.database.db
+        .update(experienceFragments)
+        .set({ title, slug, path, document, version: current.version + 1, updatedAt: new Date() })
+        .where(and(eq(experienceFragments.id, fragmentId), eq(experienceFragments.version, current.version)))
+        .returning();
+    } catch (error) {
+      if (isUniqueViolation(error)) throw new ApiException(409, 'conflict', 'Já existe um fragmento nesse caminho.');
+      throw error;
+    }
+    if (!updated) throw new ApiException(409, 'conflict', 'O fragmento foi alterado por outra pessoa.');
+    await this.access.audit(this.database.db, {
+      organizationId: site.organizationId,
+      siteId,
+      actorId: user.id,
+      actorType: this.actorType(user),
+      action: 'experience_fragment.updated',
+      entityType: 'experience_fragment',
+      entityId: fragmentId,
+      resourcePath: updated.path,
+      metadata: { versionBefore: current.version, versionAfter: updated.version },
+    });
+    return updated;
+  }
+
   async publishExperienceFragment(user: AuthUser, siteId: string, fragmentId: string) {
-    const site = await this.access.requireSite(user.id, siteId, 'content:publish');
+    const site = await this.allowFragment(user, siteId, 'fragments.publish');
     return this.database.db.transaction(async (tx) => {
       const [current] = await tx.select().from(experienceFragments).where(and(eq(experienceFragments.id, fragmentId), eq(experienceFragments.siteId, siteId))).limit(1);
       if (!current) throw new ApiException(404, 'not_found', 'Fragmento de experiência não encontrado.');
@@ -620,7 +754,7 @@ export class ExperienceService {
   }
 
   async listExperienceFragments(user: AuthUser, siteId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
+    await this.allowFragment(user, siteId, 'fragments.read');
     return { data: await this.database.db.select().from(experienceFragments).where(and(eq(experienceFragments.siteId, siteId), isNull(experienceFragments.deletedAt))) };
   }
 
@@ -686,6 +820,58 @@ export class ExperienceService {
     const [folder] = await this.database.db.select().from(folders).where(and(eq(folders.id, folderId), eq(folders.siteId, siteId))).limit(1);
     if (!folder) throw new ApiException(404, 'not_found', 'Pasta não encontrada.');
     return `${folder.path}/${slug}`;
+  }
+
+  private allowFragment(
+    user: AuthUser,
+    siteId: string,
+    permission: 'fragments.read' | 'fragments.create' | 'fragments.edit' | 'fragments.publish',
+  ) {
+    return this.authorization.assert(user, siteId, permission, { kind: 'site', folderId: null });
+  }
+
+  private fragmentSlug(value: string) {
+    try {
+      return slugify(value);
+    } catch {
+      throw new ApiException(400, 'validation_error', 'Não foi possível gerar um slug válido.');
+    }
+  }
+
+  private async assertFragmentData(siteId: string, contentTypeId: string, data: Record<string, unknown>) {
+    const contentType = await this.mustContentType(siteId, contentTypeId);
+    const issues = validateEntryData(contentType.definition, data);
+    if (issues.length > 0) throw new ApiException(400, 'validation_error', 'O fragmento não atende ao modelo.', issues);
+  }
+
+  private async mustContentFragment(siteId: string, fragmentId: string) {
+    const [fragment] = await this.database.db
+      .select()
+      .from(contentFragments)
+      .where(and(eq(contentFragments.id, fragmentId), eq(contentFragments.siteId, siteId), isNull(contentFragments.deletedAt)))
+      .limit(1);
+    if (!fragment) throw new ApiException(404, 'not_found', 'Fragmento não encontrado.');
+    return fragment;
+  }
+
+  private async mustExperienceFragment(siteId: string, fragmentId: string) {
+    const [fragment] = await this.database.db
+      .select()
+      .from(experienceFragments)
+      .where(and(eq(experienceFragments.id, fragmentId), eq(experienceFragments.siteId, siteId), isNull(experienceFragments.deletedAt)))
+      .limit(1);
+    if (!fragment) throw new ApiException(404, 'not_found', 'Fragmento de experiência não encontrado.');
+    return fragment;
+  }
+
+  private async mustContentType(siteId: string, contentTypeId: string) {
+    const [contentType] = await this.database.db
+      .select()
+      .from(contentTypes)
+      .where(and(eq(contentTypes.id, contentTypeId), eq(contentTypes.siteId, siteId), isNull(contentTypes.deletedAt)))
+      .limit(1);
+    if (!contentType) throw new ApiException(404, 'not_found', 'Modelo não encontrado.');
+    return contentType;
   }
 
   private async mustPage(siteId: string, pageId: string) {
