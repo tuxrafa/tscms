@@ -311,6 +311,79 @@ describe('fluxo editorial de ponta a ponta', () => {
     expect(html.body).toContain('Revista Norte');
     expect(html.body).toContain('class="cards"');
     expect(html.body).toContain('Assine a revista');
+    const banner = await inject('PATCH', `/v1/management/sites/${siteId}/experience-fragments/${fragment.json().id}`, {
+      expectedVersion: fragmentEdited.json().version,
+      document: {
+        ...fragmentEdited.json().document,
+        slots: {
+          main: {
+            sections: [
+              {
+                id: 'section',
+                children: [{ id: 'cta-1', type: 'block', name: 'cta', data: { title: 'Assine agora', text: 'Semanal', label: 'Assinar', href: '/assinar' } }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(banner.statusCode).toBe(200);
+    const bannerPublished = await inject('POST', `/v1/management/sites/${siteId}/experience-fragments/${fragment.json().id}/publish`);
+    expect(bannerPublished.statusCode).toBe(201);
+    expect(bannerPublished.json().updatedPages).toContain('/capa');
+    const bannerHtml = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages/by-path?path=/capa&format=html` });
+    expect(bannerHtml.statusCode).toBe(200);
+    expect(bannerHtml.body).toContain('Assine agora');
+    expect(bannerHtml.body).not.toContain('Assine a revista');
+    expect((await inject('POST', `/v1/management/sites/${siteId}/fragments/${contentFragment.json().id}/publish`)).statusCode).toBe(201);
+    const tokenPage = await inject('POST', `/v1/management/sites/${siteId}/pages`, {
+      title: 'Aviso',
+      slug: 'aviso',
+      document: {
+        schemaVersion: 1,
+        id: 'aviso',
+        type: 'page',
+        locale: 'pt-BR',
+        metadata: { title: 'Aviso', language: 'pt-BR' },
+        slots: {
+          main: {
+            sections: [
+              {
+                id: 'section-main',
+                children: [
+                  {
+                    id: 'note',
+                    type: 'defaultContent',
+                    element: 'text',
+                    data: { body: { type: 'doc', content: [{ type: 'paragraph', children: [{ type: 'text', text: 'Leia: ${fragmento.citacao}' }] }] } },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(tokenPage.statusCode).toBe(201);
+    expect((await inject('POST', `/v1/management/sites/${siteId}/pages/${tokenPage.json().id}/publish`)).statusCode).toBe(201);
+    const tokenHtml = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages/by-path?path=/aviso&format=html` });
+    expect(tokenHtml.statusCode).toBe(200);
+    expect(tokenHtml.body).toContain('Outra frase.');
+    expect(tokenHtml.body).not.toContain('${fragmento.citacao}');
+    const rewritten = await inject('PATCH', `/v1/management/sites/${siteId}/fragments/${contentFragment.json().id}`, {
+      data: {
+        title: 'Citação revista',
+        excerpt: 'Nova',
+        body: { type: 'doc', content: [{ type: 'paragraph', children: [{ type: 'text', text: 'Frase nova do fragmento' }] }] },
+      },
+      expectedVersion: contentEdited.json().version,
+    });
+    expect(rewritten.statusCode).toBe(200);
+    const tokenRepublished = await inject('POST', `/v1/management/sites/${siteId}/fragments/${contentFragment.json().id}/publish`);
+    expect(tokenRepublished.statusCode).toBe(201);
+    expect(tokenRepublished.json().updatedPages).toContain('/aviso');
+    const tokenHtmlAgain = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages/by-path?path=/aviso&format=html` });
+    expect(tokenHtmlAgain.body).toContain('Frase nova do fragmento');
     expect(html.body).toContain('<h1');
     expect(html.body).not.toContain('data-reactroot');
     const publishedPages = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages` });

@@ -40,6 +40,10 @@ const defaultElements: Record<string, DefaultContentNode['element']> = {
   code: 'code',
 };
 
+function experienceReference(fragment: { id: string; path: string }): ContentNode {
+  return { id: crypto.randomUUID(), type: 'fragmentReference', fragmentId: fragment.id, mode: 'linked', path: fragment.path };
+}
+
 function nodeFromCatalog(definition: ComponentDefinition): ContentNode {
   const element = defaultElements[definition.name];
   if (definition.kind === 'default-content' && element) {
@@ -610,6 +614,11 @@ function PageEditor({ siteId }: { siteId: string }) {
     queryKey: ['folders', siteId],
     queryFn: () => api(`/v1/management/sites/${siteId}/folders`, { token }),
   });
+  const experienceLibrary = useQuery({
+    queryKey: ['experience-fragments', siteId],
+    queryFn: () => api(`/v1/management/sites/${siteId}/experience-fragments`, { token }) as Promise<{ data: Array<{ id: string; title: string; path: string; status: string }> }>,
+  });
+  const experienceFragments = experienceLibrary.data?.data ?? [];
   const current = page.data as PageRecord | undefined;
   const [history, setHistory] = useState<HistoryState | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -665,9 +674,16 @@ function PageEditor({ siteId }: { siteId: string }) {
     <DndContext
       sensors={sensors}
       onDragEnd={(event) => {
-        const blockName = String(event.active.id).replace(/^library:/, '');
-        const definition = componentCatalog.find((item) => item.name === blockName);
-        if (!definition || !section || !history) return;
+        const activeId = String(event.active.id);
+        if (!section || !history) return;
+        if (activeId.startsWith('fragment:')) {
+          const fragment = experienceFragments.find((item) => item.id === activeId.slice('fragment:'.length));
+          if (!fragment) return;
+          setHistory(historyCommit(history, { type: 'insert', sectionId: section.id, node: experienceReference(fragment) }));
+          return;
+        }
+        const definition = componentCatalog.find((item) => item.name === activeId.replace(/^library:/, ''));
+        if (!definition) return;
         setHistory(historyCommit(history, { type: 'insert', sectionId: section.id, node: nodeFromCatalog(definition) }));
       }}
     >
@@ -699,7 +715,7 @@ function PageEditor({ siteId }: { siteId: string }) {
         </div>
       </div>
       <p className="mb-3 text-sm text-ink/60">{current?.path} · {current?.status}</p>
-      <p className="mb-3 text-sm text-ink/60">{t('canvasNote', locale)}</p>
+      <p className="mb-3 text-sm text-ink/60">{t('canvasNote', locale)} Em qualquer texto, {'${fragmento.nome}'} coloca o fragmento de texto publicado com esse nome.</p>
       {save.isError ? <p className="mb-3 text-sm text-clay">{save.error instanceof Error ? save.error.message : 'Não foi possível salvar.'}</p> : null}
       <div className="grid gap-3 lg:grid-cols-[220px_1fr_320px]">
         <aside className="rounded-3xl border border-line bg-white p-3">
@@ -716,13 +732,34 @@ function PageEditor({ siteId }: { siteId: string }) {
               />
             ))}
           </div>
+          <h2 className="mb-2 mt-4 font-serif text-xl">Fragmentos</h2>
+          <p className="mb-2 text-xs text-ink/60">Arraste um banner, ou outro fragmento de experiência, para reutilizar nesta página.</p>
+          <div className="flex max-h-48 flex-col gap-1 overflow-auto">
+            {experienceFragments.length === 0 ? <p className="text-xs text-ink/50">Nenhum fragmento ainda.</p> : experienceFragments.map((fragment) => (
+              <FragmentLibraryButton
+                key={fragment.id}
+                fragment={fragment}
+                onInsert={() => {
+                  if (!section || !history) return;
+                  setHistory(historyCommit(history, { type: 'insert', sectionId: section.id, node: experienceReference(fragment) }));
+                }}
+              />
+            ))}
+          </div>
         </aside>
         <div
           className="min-h-96 rounded-3xl border border-dashed border-line bg-white p-4"
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => {
+            if (!section || !history) return;
+            const fragmentId = event.dataTransfer.getData('application/x-tscms-fragment');
+            const fragment = experienceFragments.find((item) => item.id === fragmentId);
+            if (fragment) {
+              setHistory(historyCommit(history, { type: 'insert', sectionId: section.id, node: experienceReference(fragment) }));
+              return;
+            }
             const definition = componentCatalog.find((item) => item.name === event.dataTransfer.getData('text/plain'));
-            if (!definition || !section || !history) return;
+            if (!definition) return;
             setHistory(historyCommit(history, { type: 'insert', sectionId: section.id, node: nodeFromCatalog(definition) }));
           }}
         >
@@ -737,7 +774,7 @@ function PageEditor({ siteId }: { siteId: string }) {
               }}
             >
               <span className="text-xs uppercase text-ink/50">{node.type === 'block' ? node.name : node.type === 'defaultContent' ? node.element : 'fragmento'}</span>
-              <p>{nodeSummary(node)}</p>
+              <p>{node.type === 'fragmentReference' ? (experienceFragments.find((item) => item.id === node.fragmentId)?.title ?? node.path ?? 'Fragmento ligado') : nodeSummary(node)}</p>
             </button>
           ))}
         </div>
@@ -752,7 +789,14 @@ function PageEditor({ siteId }: { siteId: string }) {
               onDocument={(next) => setHistory(commitDocument(history!, next))}
               onProperties={setProperties}
             />
-          ) : selectedNode && selectedNode.type !== 'fragmentReference' ? (
+          ) : selectedNode?.type === 'fragmentReference' ? (
+            <div className="flex flex-col gap-2 text-sm">
+              <p>{experienceFragments.find((item) => item.id === selectedNode.fragmentId)?.title ?? 'Fragmento de experiência'}</p>
+              <p className="text-ink/60">{selectedNode.path}</p>
+              <p className="text-ink/60">Este banner fica ligado à versão publicada. Publicar o fragmento atualiza as páginas que o usam.</p>
+              <Link className="underline" to={`/sites/${siteId}/fragments/experience/${selectedNode.fragmentId}`}>Editar fragmento</Link>
+            </div>
+          ) : selectedNode ? (
             <Inspector
               siteId={siteId}
               definition={definitionFor(selectedNode)}
@@ -775,6 +819,25 @@ function PageEditor({ siteId }: { siteId: string }) {
         </aside>
       </div>
     </DndContext>
+  );
+}
+
+function FragmentLibraryButton({ fragment, onInsert }: { fragment: { id: string; title: string; status: string }; onInsert: () => void }) {
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: `fragment:${fragment.id}` });
+  return (
+    <button
+      ref={setNodeRef}
+      className="rounded-xl px-2 py-1 text-left text-sm hover:bg-paper"
+      type="button"
+      draggable
+      onDragStart={(event) => event.dataTransfer.setData('application/x-tscms-fragment', fragment.id)}
+      onClick={onInsert}
+      {...listeners}
+      {...attributes}
+    >
+      {fragment.title}
+      <span className="ml-2 text-xs uppercase text-ink/40">{fragment.status === 'published' ? 'publicado' : 'rascunho'}</span>
+    </button>
   );
 }
 
@@ -987,6 +1050,13 @@ function TemplatesPage({ siteId }: { siteId: string }) {
   );
 }
 
+function publishNotice(paths: string[] | undefined) {
+  const count = paths?.length ?? 0;
+  if (count === 0) return 'Fragmento publicado. Nenhuma página publicada usa este fragmento ainda.';
+  if (count === 1) return 'Fragmento publicado. 1 página atualizada.';
+  return `Fragmento publicado. ${count} páginas atualizadas.`;
+}
+
 function statusLabel(status: string) {
   if (status === 'draft') return 'rascunho';
   if (status === 'published') return 'publicado';
@@ -1067,6 +1137,7 @@ function ContentFragmentEditor({ siteId }: { siteId: string }) {
   });
   const loaded = useRef<string | null>(null);
   const [title, setTitle] = useState('');
+  const [slug, setSlug] = useState('');
   const [contentTypeId, setContentTypeId] = useState('');
   const [data, setData] = useState<Record<string, unknown>>({});
   const [rawData, setRawData] = useState('{}');
@@ -1081,6 +1152,7 @@ function ContentFragmentEditor({ siteId }: { siteId: string }) {
     if (loaded.current === key) return;
     if (!fragmentId) {
       setTitle('');
+      setSlug('');
       setContentTypeId('');
       setData({});
       setRawData('{}');
@@ -1091,8 +1163,9 @@ function ContentFragmentEditor({ siteId }: { siteId: string }) {
       return;
     }
     if (!fragment.data) return;
-    const row = fragment.data as { title: string; contentTypeId: string | null; data: Record<string, unknown>; version: number; status: string };
+    const row = fragment.data as { title: string; slug: string; contentTypeId: string | null; data: Record<string, unknown>; version: number; status: string };
     setTitle(row.title);
+    setSlug(row.slug);
     setContentTypeId(row.contentTypeId ?? '');
     setData(row.data ?? {});
     setRawData(JSON.stringify(row.data ?? {}, null, 2));
@@ -1146,6 +1219,7 @@ function ContentFragmentEditor({ siteId }: { siteId: string }) {
     onSuccess: (saved: { id: string; version: number; status: string; slug: string }) => {
       setVersion(saved.version);
       setStatus(saved.status);
+      setSlug(saved.slug);
       setNotice('Fragmento salvo.');
       queryClient.invalidateQueries({ queryKey: ['content-fragments', siteId] });
       if (!fragmentId) {
@@ -1157,9 +1231,9 @@ function ContentFragmentEditor({ siteId }: { siteId: string }) {
   });
   const publish = useMutation({
     mutationFn: () => api(`/v1/management/sites/${siteId}/fragments/${fragmentId}/publish`, { method: 'POST', token }),
-    onSuccess: (saved: { status: string }) => {
+    onSuccess: (saved: { status: string; updatedPages?: string[] }) => {
       setStatus(saved.status);
-      setNotice('Fragmento publicado.');
+      setNotice(publishNotice(saved.updatedPages));
       queryClient.invalidateQueries({ queryKey: ['content-fragments', siteId] });
     },
     onError: (error: Error) => setNotice(error.message),
@@ -1185,6 +1259,11 @@ function ContentFragmentEditor({ siteId }: { siteId: string }) {
         </div>
       </div>
       <p className="text-sm text-ink/60">{statusLabel(status)}</p>
+      <p className="text-sm text-ink/70">
+        {slug
+          ? <>Em qualquer texto, escreva <code>{'${fragmento.'}{slug}{'}'}</code>. A página publicada troca a tag pelo texto deste fragmento.</>
+          : 'Ao salvar, este fragmento ganha uma tag para usar dentro dos textos.'}
+      </p>
       {notice ? <p className="text-sm">{notice}</p> : null}
       <Field label="Título">
         <TextInput value={title} onChange={(event) => setTitle(event.target.value)} required />
@@ -1387,9 +1466,9 @@ function ExperienceFragmentEditor({ siteId }: { siteId: string }) {
   });
   const publish = useMutation({
     mutationFn: () => api(`/v1/management/sites/${siteId}/experience-fragments/${fragmentId}/publish`, { method: 'POST', token }),
-    onSuccess: (saved: { status: string }) => {
+    onSuccess: (saved: { status: string; updatedPages?: string[] }) => {
       setStatus(saved.status);
-      setNotice('Fragmento publicado.');
+      setNotice(publishNotice(saved.updatedPages));
       queryClient.invalidateQueries({ queryKey: ['experience-fragments', siteId] });
     },
     onError: (error: Error) => setNotice(error.message),

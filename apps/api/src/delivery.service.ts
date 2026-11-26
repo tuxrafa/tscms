@@ -19,7 +19,7 @@ import {
 } from '@tscms/database';
 import { compose } from '@tscms/content-composer';
 import type { CanonicalDocument } from '@tscms/content-schema';
-import type { FragmentLookup } from '@tscms/fragment-resolver';
+import { expandFragmentTokens, fragmentPlainText, type FragmentLookup } from '@tscms/fragment-resolver';
 import { renderPageHtml, renderPlainMain } from '@tscms/eds-compat';
 import { renderRobots, renderRss, renderSitemap, writePublishedFiles, type FeedItem } from '@tscms/publishing';
 import { createHash } from 'node:crypto';
@@ -55,12 +55,13 @@ export class DeliveryService {
     if (composed.issues.length > 0) {
       throw new ApiException(409, 'composition', 'A página publicada não pôde ser composta.', composed.issues.map((message) => ({ path: 'document', message })));
     }
-    const base = { id: page.id, path: page.path, locale: page.locale, revisionId: revision.id, document: composed.document };
+    const document = expandFragmentTokens(composed.document, this.contentTextCache.get(site.id) ?? new Map());
+    const base = { id: page.id, path: page.path, locale: page.locale, revisionId: revision.id, document };
     if (format === 'json') return base;
     const config = (site.config ?? {}) as Record<string, unknown>;
     const html = format === 'plain'
-      ? renderPlainMain(composed.document, this.renderContext(site.key, config))
-      : renderPageHtml(composed.document, this.renderContext(site.key, config));
+      ? renderPlainMain(document, this.renderContext(site.key, config))
+      : renderPageHtml(document, this.renderContext(site.key, config));
     return { ...base, html, etag: this.etag(html) };
   }
 
@@ -301,6 +302,8 @@ export class DeliveryService {
 
   private fragmentCache = new Map<string, { id: string; revisionId: string; variation: string; path: string; document: CanonicalDocument }>();
 
+  private contentTextCache = new Map<string, Map<string, string>>();
+
   async warmFragments(siteId: string) {
     const rows = await this.database.db
       .select()
@@ -318,6 +321,18 @@ export class DeliveryService {
         document: revision.document,
       });
     }
+    const texts = new Map<string, string>();
+    const contentRows = await this.database.db
+      .select()
+      .from(contentFragments)
+      .where(and(eq(contentFragments.siteId, siteId), eq(contentFragments.status, 'published'), isNull(contentFragments.deletedAt)));
+    for (const row of contentRows) {
+      if (!row.publishedRevisionId) continue;
+      const [revision] = await this.database.db.select().from(contentFragmentRevisions).where(eq(contentFragmentRevisions.id, row.publishedRevisionId)).limit(1);
+      if (!revision) continue;
+      texts.set(row.slug, fragmentPlainText(revision.data));
+    }
+    this.contentTextCache.set(siteId, texts);
   }
 
   private renderContext(siteKey: string, siteConfig: Record<string, unknown> = {}) {

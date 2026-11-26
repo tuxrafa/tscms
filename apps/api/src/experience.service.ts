@@ -24,12 +24,14 @@ import {
   type EditorialStatus,
 } from '@tscms/content-schema';
 import { assertTransition, slugify, validateEntryData } from '@tscms/core-domain';
+import { collectFragmentReferences, pageUsesExperienceFragment, valueContainsFragmentToken } from '@tscms/fragment-resolver';
 import { blueprintTemplates } from '@tscms/template-engine';
 import { z } from 'zod';
 import { AccessService } from './access.service.js';
 import { AuthorizationService } from './authorization.service.js';
 import { ApiException, isUniqueViolation, parseInput, type AuthUser } from './common.js';
 import { DatabaseService } from './database.service.js';
+import { DeliveryService } from './delivery.service.js';
 
 const pageWriteSchema = z.object({
   title: z.string().min(1),
@@ -50,6 +52,7 @@ export class ExperienceService {
     private readonly database: DatabaseService,
     private readonly access: AccessService,
     private readonly authorization: AuthorizationService,
+    private readonly delivery: DeliveryService,
   ) {}
 
   async ensureBlueprints(user: AuthUser, siteId: string) {
@@ -599,7 +602,7 @@ export class ExperienceService {
 
   async publishContentFragment(user: AuthUser, siteId: string, fragmentId: string) {
     const site = await this.allowFragment(user, siteId, 'fragments.publish');
-    return this.database.db.transaction(async (tx) => {
+    const published = await this.database.db.transaction(async (tx) => {
       const [current] = await tx.select().from(contentFragments).where(and(eq(contentFragments.id, fragmentId), eq(contentFragments.siteId, siteId))).limit(1);
       if (!current) throw new ApiException(404, 'not_found', 'Fragmento não encontrado.');
       const [revision] = await tx
@@ -621,6 +624,15 @@ export class ExperienceService {
       });
       return updated;
     });
+    if (!published) throw new ApiException(404, 'not_found', 'Fragmento não encontrado.');
+    const experiences = await this.publishedExperienceDocuments(siteId);
+    const updatedPages = await this.refreshPublishedPages(site, (document) =>
+      valueContainsFragmentToken(document, published.slug) ||
+      collectFragmentReferences(document).some(
+        (node) => node.mode === 'linked' && valueContainsFragmentToken(experiences.get(node.fragmentId), published.slug),
+      ),
+    );
+    return { ...published, updatedPages };
   }
 
   async listContentFragments(user: AuthUser, siteId: string) {
@@ -728,7 +740,7 @@ export class ExperienceService {
 
   async publishExperienceFragment(user: AuthUser, siteId: string, fragmentId: string) {
     const site = await this.allowFragment(user, siteId, 'fragments.publish');
-    return this.database.db.transaction(async (tx) => {
+    const published = await this.database.db.transaction(async (tx) => {
       const [current] = await tx.select().from(experienceFragments).where(and(eq(experienceFragments.id, fragmentId), eq(experienceFragments.siteId, siteId))).limit(1);
       if (!current) throw new ApiException(404, 'not_found', 'Fragmento de experiência não encontrado.');
       const [revision] = await tx
@@ -751,6 +763,9 @@ export class ExperienceService {
       });
       return updated;
     });
+    if (!published) throw new ApiException(404, 'not_found', 'Fragmento de experiência não encontrado.');
+    const updatedPages = await this.refreshPublishedPages(site, (document) => pageUsesExperienceFragment(document, fragmentId));
+    return { ...published, updatedPages };
   }
 
   async listExperienceFragments(user: AuthUser, siteId: string) {
@@ -820,6 +835,51 @@ export class ExperienceService {
     const [folder] = await this.database.db.select().from(folders).where(and(eq(folders.id, folderId), eq(folders.siteId, siteId))).limit(1);
     if (!folder) throw new ApiException(404, 'not_found', 'Pasta não encontrada.');
     return `${folder.path}/${slug}`;
+  }
+
+  private async publishedExperienceDocuments(siteId: string) {
+    const rows = await this.database.db
+      .select()
+      .from(experienceFragments)
+      .where(and(eq(experienceFragments.siteId, siteId), isNull(experienceFragments.deletedAt)));
+    const documents = new Map<string, CanonicalDocument>();
+    for (const row of rows) {
+      if (!row.publishedRevisionId) {
+        documents.set(row.id, row.document);
+        continue;
+      }
+      const [revision] = await this.database.db
+        .select()
+        .from(experienceFragmentRevisions)
+        .where(eq(experienceFragmentRevisions.id, row.publishedRevisionId))
+        .limit(1);
+      documents.set(row.id, revision?.document ?? row.document);
+    }
+    return documents;
+  }
+
+  private async refreshPublishedPages(
+    site: { id: string; key: string },
+    usesFragment: (document: CanonicalDocument) => boolean,
+  ) {
+    const rows = await this.database.db
+      .select()
+      .from(pages)
+      .where(and(eq(pages.siteId, site.id), eq(pages.status, 'published'), isNull(pages.deletedAt)));
+    const affected = rows.filter((page) => usesFragment(page.document));
+    if (affected.length === 0) return [];
+    await this.database.db
+      .update(pages)
+      .set({ updatedAt: new Date() })
+      .where(inArray(pages.id, affected.map((page) => page.id)));
+    for (const page of affected) {
+      try {
+        await this.delivery.writeStatic(site.key, page.path);
+      } catch {
+        // A entrega ao vivo ainda resolve o fragmento publicado na próxima leitura.
+      }
+    }
+    return affected.map((page) => page.path);
   }
 
   private allowFragment(
