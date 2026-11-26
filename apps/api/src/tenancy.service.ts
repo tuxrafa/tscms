@@ -104,6 +104,7 @@ export class TenancyService {
     const site = await this.access.requireSite(user.id, siteId, 'site:manage');
     const body = parseInput(
       z.object({
+        name: z.string().trim().min(2).max(160).optional(),
         domains: z.array(z.string()).optional(),
         locales: z.array(z.string()).min(1).optional(),
         rendererVersion: z.string().optional(),
@@ -119,6 +120,38 @@ export class TenancyService {
       .set({ ...body, updatedAt: new Date() })
       .where(eq(sites.id, site.id))
       .returning();
+    if (body.name !== undefined && body.name !== site.name) {
+      await this.access.audit(this.database.db, {
+        organizationId: site.organizationId,
+        siteId: site.id,
+        actorId: user.id,
+        action: 'site.renamed',
+        entityType: 'site',
+        entityId: site.id,
+        metadata: { from: site.name, to: body.name },
+      });
+    }
     return updated;
+  }
+
+  async deleteSite(user: AuthUser, siteId: string) {
+    const site = await this.access.requireSite(user.id, siteId, 'site:manage');
+    return this.database.db.transaction(async (tx) => {
+      const [removed] = await tx
+        .update(sites)
+        .set({ deletedAt: new Date(), key: `${site.key}--deleted-${site.id}`, updatedAt: new Date() })
+        .where(eq(sites.id, site.id))
+        .returning();
+      await this.access.audit(tx, {
+        organizationId: site.organizationId,
+        siteId: site.id,
+        actorId: user.id,
+        action: 'site.deleted',
+        entityType: 'site',
+        entityId: site.id,
+        metadata: { name: site.name, key: site.key },
+      });
+      return removed;
+    });
   }
 }

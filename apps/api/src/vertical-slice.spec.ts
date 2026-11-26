@@ -431,6 +431,50 @@ describe('fluxo editorial de ponta a ponta', () => {
     expect(outsider.statusCode).toBe(401);
   });
 
+  it('renomeia e remove um site sem afetar outros nem reutilizar a chave de entrega', async () => {
+    const created = await inject('POST', `/v1/management/organizations/${organizationId}/workspaces/${workspaceId}/sites`, {
+      name: 'Site Temporário',
+      key: 'site-temporario',
+      locales: ['pt-BR'],
+    });
+    expect(created.statusCode).toBe(201);
+    const tempId = created.json().id;
+
+    const renamed = await inject('PATCH', `/v1/management/sites/${tempId}`, { name: '  Site Renomeado  ' });
+    expect(renamed.statusCode).toBe(200);
+    expect(renamed.json().name).toBe('Site Renomeado');
+    expect(renamed.json().key).toBe('site-temporario');
+    expect((await inject('PATCH', `/v1/management/sites/${tempId}`, { name: 'x' })).statusCode).toBe(400);
+
+    const viewer = await app.inject({
+      method: 'POST',
+      url: '/v1/management/auth/register',
+      payload: { name: 'Leitor', email: 'leitor@example.com', password: 'senha-segura-123', organizationName: 'Outra Casa' },
+    });
+    const intruder = { authorization: `Bearer ${viewer.json().token}` };
+    expect((await app.inject({ method: 'PATCH', url: `/v1/management/sites/${tempId}`, payload: { name: 'Invasão' }, headers: intruder })).statusCode).toBe(403);
+    expect((await app.inject({ method: 'DELETE', url: `/v1/management/sites/${tempId}`, headers: intruder })).statusCode).toBe(403);
+
+    const removed = await inject('DELETE', `/v1/management/sites/${tempId}`);
+    expect(removed.statusCode).toBe(200);
+    expect(removed.json().deletedAt).toBeTruthy();
+
+    const listed = await inject('GET', '/v1/management/sites');
+    const ids = listed.json().data.map((item: { id: string }) => item.id);
+    expect(ids).not.toContain(tempId);
+    expect(ids).toContain(siteId);
+    expect((await inject('GET', `/v1/management/sites/${tempId}`)).statusCode).toBe(404);
+    expect((await inject('DELETE', `/v1/management/sites/${tempId}`)).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: '/v1/delivery/sites/site-temporario/pages' })).statusCode).toBe(404);
+
+    const reused = await inject('POST', `/v1/management/organizations/${organizationId}/workspaces/${workspaceId}/sites`, {
+      name: 'Site Temporário',
+      key: 'site-temporario',
+      locales: ['pt-BR'],
+    });
+    expect(reused.statusCode).toBe(201);
+  });
+
   async function upload(file: Buffer, filename: string, folderId?: string, url = `/v1/management/sites/${siteId}/media${folderId ? `?folderId=${folderId}` : ''}`) {
     const boundary = '----tscms';
     const payload = Buffer.concat([
