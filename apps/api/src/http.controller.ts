@@ -11,6 +11,9 @@ import { DamService } from './dam.service.js';
 import { DeliveryService } from './delivery.service.js';
 import { ExperienceService } from './experience.service.js';
 import { IdentityService } from './identity.service.js';
+import { IamService } from './iam.service.js';
+import { clearSession, writeSession } from './auth-cookies.js';
+import { revokeSession } from './sessions.js';
 import { PlatformService } from './platform.service.js';
 import { TenancyService } from './tenancy.service.js';
 import { DatabaseService } from './database.service.js';
@@ -18,18 +21,56 @@ import { DatabaseService } from './database.service.js';
 @ApiTags('identity')
 @Controller('v1/management')
 export class IdentityController {
-  constructor(private readonly identity: IdentityService) {}
+  constructor(
+    private readonly identity: IdentityService,
+    private readonly iam: IamService,
+    private readonly database: DatabaseService,
+  ) {}
 
   @Public()
   @Post('auth/register')
-  register(@Body() body: unknown) {
-    return this.identity.register(body);
+  async register(@Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+    const result = await this.identity.register(body);
+    writeSession(reply, result.token, result.csrf);
+    return result;
   }
 
   @Public()
   @Post('auth/login')
-  login(@Body() body: unknown) {
-    return this.identity.login(body);
+  async login(@Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+    const result = await this.identity.login(body);
+    writeSession(reply, result.token, result.csrf);
+    return result;
+  }
+
+  @Public()
+  @Post('auth/invitations/accept')
+  async acceptInvite(@Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+    const result = await this.iam.acceptInvite(body);
+    writeSession(reply, result.token, result.csrf);
+    return result;
+  }
+
+  @Public()
+  @Post('auth/password/reset')
+  async acceptReset(@Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+    const result = await this.iam.acceptReset(body);
+    writeSession(reply, result.token, result.csrf);
+    return result;
+  }
+
+  @Post('auth/logout')
+  async logout(@CurrentUser() user: AuthUser, @Res({ passthrough: true }) reply: FastifyReply) {
+    if (user.sessionId) await revokeSession(this.database.db, user.sessionId);
+    clearSession(reply);
+    return { ok: true };
+  }
+
+  @Post('auth/password')
+  async changePassword(@CurrentUser() user: AuthUser, @Body() body: unknown, @Res({ passthrough: true }) reply: FastifyReply) {
+    const result = await this.iam.changePassword(user, body);
+    writeSession(reply, result.token, result.csrf);
+    return { token: result.token, csrf: result.csrf };
   }
 
   @ApiBearerAuth()
@@ -225,6 +266,16 @@ export class ContentController {
   @Patch('sites/:siteId/pages/:pageId')
   updatePage(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('pageId') pageId: string, @Body() body: unknown) {
     return this.experience.updatePage(user, siteId, pageId, body);
+  }
+
+  @Get('sites/:siteId/pages/:pageId/history')
+  pageHistory(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('pageId') pageId: string) {
+    return this.experience.pageHistory(user, siteId, pageId);
+  }
+
+  @Post('sites/:siteId/pages/:pageId/restore')
+  restorePage(@CurrentUser() user: AuthUser, @Param('siteId') siteId: string, @Param('pageId') pageId: string, @Body() body: { revisionId: string }) {
+    return this.experience.restorePage(user, siteId, pageId, body.revisionId);
   }
 
   @Post('sites/:siteId/pages/:pageId/publish')

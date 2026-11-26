@@ -12,6 +12,7 @@ import {
 import { createImageRenditions, createStorage, detectMedia, sha256, type StorageProvider } from '@tscms/media';
 import { z } from 'zod';
 import { AccessService } from './access.service.js';
+import { AuthorizationService } from './authorization.service.js';
 import { ApiException, isUniqueViolation, parseInput, type AuthUser } from './common.js';
 import { DatabaseService } from './database.service.js';
 
@@ -33,21 +34,22 @@ export class DamService {
   constructor(
     private readonly database: DatabaseService,
     private readonly access: AccessService,
+    private readonly authorization: AuthorizationService,
   ) {}
 
   async listFolders(user: AuthUser, siteId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
+    const scope = await this.authorization.scope(user, siteId, 'assets.read', 'asset');
     const data = await this.database.db
       .select()
       .from(assetFolders)
       .where(and(eq(assetFolders.siteId, siteId), isNull(assetFolders.deletedAt)))
       .orderBy(asc(assetFolders.path));
-    return { data };
+    return { data: scope === 'all' ? data : data.filter((folder) => scope.has(folder.id)) };
   }
 
   async createFolder(user: AuthUser, siteId: string, input: unknown) {
-    const site = await this.access.requireSite(user.id, siteId, 'media:manage');
     const body = parseInput(folderSchema, input);
+    const site = await this.authorization.assert(user, siteId, 'assets.upload', { kind: 'asset', folderId: body.parentId ?? null });
     const slug = body.name
       .normalize('NFD')
       .replace(/\p{Diacritic}/gu, '')
@@ -81,27 +83,31 @@ export class DamService {
   }
 
   async listAssets(user: AuthUser, siteId: string, query: { folderId?: string; q?: string }) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
+    const scope = await this.authorization.scope(user, siteId, 'assets.read', 'asset');
     const filters = [eq(assets.siteId, siteId), isNull(assets.deletedAt)];
-    if (query.folderId) filters.push(eq(assets.folderId, query.folderId));
+    if (query.folderId) {
+      if (scope !== 'all' && !scope.has(query.folderId)) throw new ApiException(403, 'forbidden', 'Permissão insuficiente.');
+      filters.push(eq(assets.folderId, query.folderId));
+    }
     if (query.q?.trim()) {
       const pattern = `%${query.q.trim()}%`;
       filters.push(or(ilike(assets.filename, pattern), ilike(assets.title, pattern), ilike(assets.description, pattern))!);
     }
     const rows = await this.database.db.select().from(assets).where(and(...filters)).orderBy(desc(assets.updatedAt));
-    return { data: rows.map((asset) => this.summary(asset)) };
+    const visible = scope === 'all' ? rows : rows.filter((asset) => scope.has(asset.folderId));
+    return { data: visible.map((asset) => this.summary(asset)) };
   }
 
   async getAsset(user: AuthUser, siteId: string, assetId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
     const asset = await this.mustAsset(siteId, assetId);
+    await this.authorization.assert(user, siteId, 'assets.read', { kind: 'asset', folderId: asset.folderId });
     const versions = await this.database.db.select().from(assetVersions).where(eq(assetVersions.assetId, assetId)).orderBy(desc(assetVersions.version));
     const renditions = await this.database.db.select().from(assetVariants).where(eq(assetVariants.assetId, assetId)).orderBy(asc(assetVariants.width));
     return { ...this.summary(asset), versions, renditions: renditions.filter((item) => item.versionId === versions[0]?.id || versions.length === 0) };
   }
 
   async upload(user: AuthUser, siteId: string, file: { filename: string; buffer: Buffer }, options: { folderId?: string | null; force?: boolean } = {}) {
-    const site = await this.access.requireSite(user.id, siteId, 'media:manage');
+    const site = await this.authorization.assert(user, siteId, 'assets.upload', { kind: 'asset', folderId: options.folderId ?? null });
     this.assertSize(file.buffer);
     const detected = this.detect(file.buffer);
     const checksum = sha256(file.buffer);
@@ -158,8 +164,8 @@ export class DamService {
   }
 
   async addVersion(user: AuthUser, siteId: string, assetId: string, file: { buffer: Buffer }) {
-    const site = await this.access.requireSite(user.id, siteId, 'media:manage');
     const asset = await this.mustAsset(siteId, assetId);
+    const site = await this.authorization.assert(user, siteId, 'assets.manage_versions', { kind: 'asset', folderId: asset.folderId });
     this.assertSize(file.buffer);
     const detected = this.detect(file.buffer);
     const checksum = sha256(file.buffer);
@@ -194,9 +200,13 @@ export class DamService {
   }
 
   async updateMetadata(user: AuthUser, siteId: string, assetId: string, input: unknown) {
-    const site = await this.access.requireSite(user.id, siteId, 'media:manage');
     const body = parseInput(metadataSchema, input);
-    await this.mustAsset(siteId, assetId);
+    const asset = await this.mustAsset(siteId, assetId);
+    const site = await this.authorization.assert(user, siteId, 'assets.manage_metadata', { kind: 'asset', folderId: asset.folderId });
+    if (body.folderId !== undefined && body.folderId !== asset.folderId) {
+      await this.authorization.assert(user, siteId, 'assets.move', { kind: 'asset', folderId: asset.folderId });
+      await this.authorization.assert(user, siteId, 'assets.upload', { kind: 'asset', folderId: body.folderId });
+    }
     const folder = body.folderId ? await this.mustFolder(siteId, body.folderId) : body.folderId === null ? null : undefined;
     const [updated] = await this.database.db
       .update(assets)
@@ -224,8 +234,9 @@ export class DamService {
   }
 
   async setStatus(user: AuthUser, siteId: string, assetId: string, status: 'published' | 'ready' | 'archived') {
-    const site = await this.access.requireSite(user.id, siteId, status === 'published' ? 'content:publish' : 'media:manage');
     const asset = await this.mustAsset(siteId, assetId);
+    const permission = status === 'published' ? 'assets.publish' : status === 'archived' ? 'assets.delete' : 'assets.unpublish';
+    const site = await this.authorization.assert(user, siteId, permission, { kind: 'asset', folderId: asset.folderId });
     if (asset.status === 'processing' || asset.status === 'failed') throw new ApiException(409, 'invalid_transition', 'O arquivo ainda não está pronto.');
     const [updated] = await this.database.db.update(assets).set({ status, updatedAt: new Date() }).where(eq(assets.id, assetId)).returning();
     await this.access.audit(this.database.db, {
@@ -240,22 +251,22 @@ export class DamService {
   }
 
   async createCollection(user: AuthUser, siteId: string, input: unknown) {
-    await this.access.requireSite(user.id, siteId, 'media:manage');
+    await this.authorization.assert(user, siteId, 'assets.edit', { kind: 'asset', folderId: null });
     const body = parseInput(z.object({ name: z.string().min(1).max(160), description: z.string().max(500).optional() }), input);
     const [collection] = await this.database.db.insert(assetCollections).values({ siteId, name: body.name, description: body.description ?? '' }).returning();
     return collection;
   }
 
   async listCollections(user: AuthUser, siteId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
+    await this.authorization.scope(user, siteId, 'assets.read', 'asset');
     return { data: await this.database.db.select().from(assetCollections).where(eq(assetCollections.siteId, siteId)).orderBy(asc(assetCollections.name)) };
   }
 
   async addToCollection(user: AuthUser, siteId: string, collectionId: string, assetId: string) {
-    await this.access.requireSite(user.id, siteId, 'media:manage');
+    const asset = await this.mustAsset(siteId, assetId);
+    await this.authorization.assert(user, siteId, 'assets.edit', { kind: 'asset', folderId: asset.folderId });
     const [collection] = await this.database.db.select().from(assetCollections).where(and(eq(assetCollections.id, collectionId), eq(assetCollections.siteId, siteId))).limit(1);
     if (!collection) throw new ApiException(404, 'not_found', 'Coleção não encontrada.');
-    await this.mustAsset(siteId, assetId);
     await this.database.db.insert(assetCollectionItems).values({ collectionId, assetId }).onConflictDoNothing();
     return { collectionId, assetId };
   }
@@ -350,8 +361,8 @@ export class DamService {
   }
 
   async readManagedRendition(user: AuthUser, siteId: string, assetId: string, preset: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
     const asset = await this.mustAsset(siteId, assetId);
+    await this.authorization.assert(user, siteId, 'assets.download', { kind: 'asset', folderId: asset.folderId });
     const [site] = await this.database.db.select().from(sites).where(eq(sites.id, siteId)).limit(1);
     if (!site) throw new ApiException(404, 'not_found', 'Site não encontrado.');
     return this.readRendition(site.key, asset.id, preset, { publicOnly: false });

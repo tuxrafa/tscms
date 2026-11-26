@@ -19,6 +19,7 @@ const alias = {
   '@tscms/eds-runtime': path.resolve('packages/eds-runtime/src/index.ts'),
   '@tscms/renderer-contracts': path.resolve('packages/renderer-contracts/src/index.ts'),
   '@tscms/embed-sdk': path.resolve('packages/embed-sdk/src/index.ts'),
+  '@tscms/performance-defaults': path.resolve('packages/performance-defaults/src/index.ts'),
   '@tscms/cli': path.resolve('packages/cli/src/index.ts'),
   '@tscms/ui': path.resolve('packages/ui/src/index.ts'),
 };

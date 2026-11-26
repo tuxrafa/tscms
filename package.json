@@ -19,6 +19,7 @@
     "test:watch": "vitest",
     "db:migrate": "tsx packages/database/src/migrate.ts",
     "db:seed": "node --import @swc-node/register/esm-register apps/api/src/seed.ts",
+    "portal:bootstrap-admin": "node --import @swc-node/register/esm-register apps/api/src/bootstrap-admin.ts",
     "openapi": "node --import @swc-node/register/esm-register apps/api/src/export-openapi.ts"
   },
   "pnpm": {
