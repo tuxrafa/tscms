@@ -21,11 +21,20 @@ const timestamps = {
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull(),
+  login: text('login'),
   name: text('name').notNull(),
   passwordHash: text('password_hash').notNull(),
   locale: text('locale').notNull().default('pt-BR'),
+  status: text('status').notNull().default('active'),
+  kind: text('kind').notNull().default('human'),
+  authMethod: text('auth_method').notNull().default('local'),
+  platformAdmin: boolean('platform_admin').notNull().default(false),
+  description: text('description').notNull().default(''),
+  ownerId: uuid('owner_id'),
+  lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
+  passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
   ...timestamps,
-}, (table) => [uniqueIndex('users_email_unique').on(table.email)]);
+}, (table) => [uniqueIndex('users_email_unique').on(table.email), uniqueIndex('users_login_unique').on(table.login)]);
 
 export const organizations = pgTable('organizations', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -482,15 +491,23 @@ export const rssSources = pgTable('rss_sources', {
 
 export const auditEvents = pgTable('audit_events', {
   id: uuid('id').primaryKey().defaultRandom(),
-  organizationId: uuid('organization_id').notNull(),
+  organizationId: uuid('organization_id'),
   siteId: uuid('site_id'),
   actorId: uuid('actor_id'),
+  actorType: text('actor_type').notNull().default('human'),
   action: text('action').notNull(),
+  result: text('result').notNull().default('success'),
   entityType: text('entity_type').notNull(),
   entityId: text('entity_id').notNull(),
+  resourcePath: text('resource_path'),
+  requestId: text('request_id'),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}, (table) => [index('audit_events_org_idx').on(table.organizationId, table.createdAt)]);
+}, (table) => [
+  index('audit_events_org_idx').on(table.organizationId, table.createdAt),
+  index('audit_events_entity_idx').on(table.entityType, table.entityId, table.createdAt),
+  index('audit_events_actor_idx').on(table.actorId, table.createdAt),
+]);
 
 export const webhookEndpoints = pgTable('webhook_endpoints', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -550,5 +567,66 @@ export const idempotencyKeys = pgTable('idempotency_keys', {
   response: jsonb('response').$type<Record<string, unknown>>().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const iamSessions = pgTable('iam_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  userAgent: text('user_agent'),
+  ip: text('ip'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [index('iam_sessions_user_idx').on(table.userId)]);
+
+export const iamAccessGrants = pgTable('iam_access_grants', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+  userId: uuid('user_id').references(() => users.id),
+  roleId: uuid('role_id').references(() => roles.id),
+  siteId: uuid('site_id').references(() => sites.id),
+  scopeType: text('scope_type').notNull(),
+  scopeId: uuid('scope_id'),
+  includeDescendants: boolean('include_descendants').notNull().default(true),
+  permissions: jsonb('permissions').$type<string[]>().notNull(),
+  delegable: boolean('delegable').notNull().default(false),
+  label: text('label').notNull().default(''),
+  createdBy: uuid('created_by'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [
+  index('iam_access_grants_user_idx').on(table.userId),
+  index('iam_access_grants_role_idx').on(table.roleId),
+  index('iam_access_grants_org_idx').on(table.organizationId, table.siteId),
+]);
+
+export const iamGroupMembers = pgTable('iam_group_members', {
+  roleId: uuid('role_id').notNull().references(() => roles.id),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [primaryKey({ columns: [table.roleId, table.userId] })]);
+
+export const iamCredentials = pgTable('iam_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  kind: text('kind').notNull(),
+  tokenHash: text('token_hash').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex('iam_credentials_hash_unique').on(table.tokenHash), index('iam_credentials_user_idx').on(table.userId)]);
+
+/** Placeholder for a future OIDC, SAML or directory link. No connector writes here yet. */
+export const iamExternalIdentities = pgTable('iam_external_identities', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').notNull().references(() => users.id),
+  provider: text('provider').notNull(),
+  issuer: text('issuer').notNull(),
+  subject: text('subject').notNull(),
+  providerTenant: text('provider_tenant'),
+  linkState: text('link_state').notNull().default('pending'),
+  syncedAt: timestamp('synced_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (table) => [uniqueIndex('iam_external_identities_subject_unique').on(table.provider, table.issuer, table.subject)]);
 
 export const searchVectorSql = sql`to_tsvector('simple', title || ' ' || body)`;

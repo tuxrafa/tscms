@@ -1,12 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import {
+  auditEvents,
   contentFragments,
   contentFragmentRevisions,
   experienceFragmentRevisions,
   experienceFragments,
   folders,
   pageRevisions,
+  users,
   pages,
   templateRevisions,
   templates,
@@ -24,6 +26,7 @@ import { assertTransition, slugify } from '@tscms/core-domain';
 import { blueprintTemplates } from '@tscms/template-engine';
 import { z } from 'zod';
 import { AccessService } from './access.service.js';
+import { AuthorizationService } from './authorization.service.js';
 import { ApiException, isUniqueViolation, parseInput, type AuthUser } from './common.js';
 import { DatabaseService } from './database.service.js';
 
@@ -45,6 +48,7 @@ export class ExperienceService {
   constructor(
     private readonly database: DatabaseService,
     private readonly access: AccessService,
+    private readonly authorization: AuthorizationService,
   ) {}
 
   async ensureBlueprints(user: AuthUser, siteId: string) {
@@ -137,8 +141,8 @@ export class ExperienceService {
   }
 
   async createFolder(user: AuthUser, siteId: string, input: unknown) {
-    await this.access.requireSite(user.id, siteId, 'content:write');
     const body = parseInput(z.object({ name: z.string().min(1), parentId: z.string().uuid().nullable().optional() }), input);
+    await this.authorization.assert(user, siteId, 'pages.create', { kind: 'page', folderId: body.parentId ?? null });
     const slug = slugify(body.name);
     let parentPath = '';
     if (body.parentId) {
@@ -154,17 +158,17 @@ export class ExperienceService {
   }
 
   async listFolders(user: AuthUser, siteId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
+    const scope = await this.authorization.scope(user, siteId, 'pages.read', 'page');
     const data = await this.database.db
       .select({ id: folders.id, name: folders.name, path: folders.path, parentId: folders.parentId })
       .from(folders)
       .where(and(eq(folders.siteId, siteId), isNull(folders.deletedAt)))
       .orderBy(asc(folders.path));
-    return { data };
+    return { data: scope === 'all' ? data : data.filter((folder) => scope.has(folder.id)) };
   }
 
   async listPages(user: AuthUser, siteId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
+    const scope = await this.authorization.scope(user, siteId, 'pages.read', 'page');
     const data = await this.database.db
       .select({
         id: pages.id,
@@ -179,16 +183,17 @@ export class ExperienceService {
       .from(pages)
       .where(and(eq(pages.siteId, siteId), isNull(pages.deletedAt)))
       .orderBy(asc(pages.path));
-    return { data };
+    return { data: scope === 'all' ? data : data.filter((page) => scope.has(page.folderId)) };
   }
 
   async getPage(user: AuthUser, siteId: string, pageId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
-    return this.mustPage(siteId, pageId);
+    const page = await this.mustPage(siteId, pageId);
+    await this.authorization.assert(user, siteId, 'pages.read', { kind: 'page', folderId: page.folderId });
+    return page;
   }
 
   async tree(user: AuthUser, siteId: string, parentFolderId?: string) {
-    await this.access.requireSite(user.id, siteId, 'content:read');
+    const scope = await this.authorization.scope(user, siteId, 'pages.read', 'page');
     const folderFilter = parentFolderId ? eq(folders.parentId, parentFolderId) : isNull(folders.parentId);
     const pageFilter = parentFolderId ? eq(pages.folderId, parentFolderId) : isNull(pages.folderId);
     const folderRows = await this.database.db
@@ -201,12 +206,15 @@ export class ExperienceService {
       .from(pages)
       .where(and(eq(pages.siteId, siteId), pageFilter, isNull(pages.deletedAt)))
       .orderBy(asc(pages.title));
-    return { folders: folderRows, pages: pageRows };
+    return {
+      folders: scope === 'all' ? folderRows : folderRows.filter((folder) => scope.has(folder.id)),
+      pages: scope === 'all' ? pageRows : pageRows.filter((page) => scope.has(page.folderId)),
+    };
   }
 
   async createPage(user: AuthUser, siteId: string, input: unknown) {
-    const site = await this.access.requireSite(user.id, siteId, 'content:write');
     const body = parseInput(pageWriteSchema, input);
+    const site = await this.authorization.assert(user, siteId, 'pages.create', { kind: 'page', folderId: body.folderId ?? null });
     const slug = body.path === '/' ? 'home' : slugify(body.slug ?? body.title);
     const path = body.path ?? (await this.pathFor(siteId, body.folderId ?? null, slug));
     let template: EditableTemplate | undefined;
@@ -234,9 +242,11 @@ export class ExperienceService {
         organizationId: site.organizationId,
         siteId,
         actorId: user.id,
+        actorType: this.actorType(user),
         action: 'page.created',
         entityType: 'page',
         entityId: page?.id ?? '',
+        resourcePath: page?.path,
       });
       return page;
     } catch (error) {
@@ -246,9 +256,9 @@ export class ExperienceService {
   }
 
   async updatePage(user: AuthUser, siteId: string, pageId: string, input: unknown) {
-    const site = await this.access.requireSite(user.id, siteId, 'content:write');
     const body = parseInput(pageWriteSchema.partial(), input);
     const current = await this.mustPage(siteId, pageId);
+    const site = await this.authorization.assert(user, siteId, 'pages.edit', { kind: 'page', folderId: current.folderId });
     if (body.expectedVersion && body.expectedVersion !== current.version) {
       throw new ApiException(409, 'conflict', 'A página foi alterada por outra pessoa.');
     }
@@ -256,6 +266,10 @@ export class ExperienceService {
       throw new ApiException(400, 'validation_error', 'O slug só pode ter letras minúsculas, números e hífens.');
     }
     const folderId = body.folderId === undefined ? current.folderId : body.folderId;
+    if (folderId !== current.folderId) {
+      await this.authorization.assert(user, siteId, 'pages.move', { kind: 'page', folderId: current.folderId });
+      await this.authorization.assert(user, siteId, 'pages.create', { kind: 'page', folderId });
+    }
     if (folderId) {
       const [folder] = await this.database.db
         .select({ id: folders.id })
@@ -295,19 +309,28 @@ export class ExperienceService {
       throw error;
     }
     if (!updated) throw new ApiException(409, 'conflict', 'A página foi alterada por outra pessoa.');
+    const changes = [
+      body.title && body.title !== current.title ? 'title' : null,
+      path !== current.path ? 'path' : null,
+      body.document ? 'document' : null,
+    ].filter((change): change is string => Boolean(change));
     await this.access.audit(this.database.db, {
       organizationId: site.organizationId,
       siteId,
       actorId: user.id,
+      actorType: this.actorType(user),
       action: 'page.updated',
       entityType: 'page',
       entityId: pageId,
+      resourcePath: updated.path,
+      metadata: { changes, versionBefore: current.version, versionAfter: updated.version },
     });
     return updated;
   }
 
   async publishPage(user: AuthUser, siteId: string, pageId: string) {
-    const site = await this.access.requireSite(user.id, siteId, 'content:publish');
+    const existing = await this.mustPage(siteId, pageId);
+    const site = await this.authorization.assert(user, siteId, 'pages.publish', { kind: 'page', folderId: existing.folderId });
     return this.database.db.transaction(async (tx) => {
       const [current] = await tx.select().from(pages).where(eq(pages.id, pageId)).for('update');
       if (!current || current.siteId !== siteId) throw new ApiException(404, 'not_found', 'Página não encontrada.');
@@ -342,17 +365,20 @@ export class ExperienceService {
         organizationId: site.organizationId,
         siteId,
         actorId: user.id,
+        actorType: this.actorType(user),
         action: 'page.published',
         entityType: 'page',
         entityId: pageId,
-        metadata: { revisionId: revision?.id, templateRevisionId },
+        resourcePath: current.path,
+        metadata: { revisionId: revision?.id, templateRevisionId, version: current.version },
       });
       return { page: updated, revision };
     });
   }
 
   async unpublishPage(user: AuthUser, siteId: string, pageId: string) {
-    const site = await this.access.requireSite(user.id, siteId, 'content:publish');
+    const existing = await this.mustPage(siteId, pageId);
+    const site = await this.authorization.assert(user, siteId, 'pages.unpublish', { kind: 'page', folderId: existing.folderId });
     const [updated] = await this.database.db
       .update(pages)
       .set({ status: 'draft', updatedAt: new Date() })
@@ -363,11 +389,59 @@ export class ExperienceService {
       organizationId: site.organizationId,
       siteId,
       actorId: user.id,
+      actorType: this.actorType(user),
       action: 'page.unpublished',
       entityType: 'page',
       entityId: pageId,
+      resourcePath: updated.path,
     });
     return updated;
+  }
+
+  async pageHistory(user: AuthUser, siteId: string, pageId: string) {
+    const page = await this.getPage(user, siteId, pageId);
+    await this.authorization.assert(user, siteId, 'pages.view_history', { kind: 'page', folderId: page.folderId });
+    const revisions = await this.database.db.select().from(pageRevisions).where(eq(pageRevisions.pageId, pageId)).orderBy(asc(pageRevisions.version));
+    const events = await this.database.db
+      .select()
+      .from(auditEvents)
+      .where(and(eq(auditEvents.entityType, 'page'), eq(auditEvents.entityId, pageId)))
+      .orderBy(asc(auditEvents.createdAt));
+    const actorIds = [...new Set(events.map((event) => event.actorId).filter((id): id is string => Boolean(id)))];
+    const actors = actorIds.length
+      ? await this.database.db.select({ id: users.id, name: users.name, kind: users.kind }).from(users).where(inArray(users.id, actorIds))
+      : [];
+    const actorById = new Map(actors.map((actor) => [actor.id, actor]));
+    return {
+      page: { id: page.id, title: page.title, path: page.path, version: page.version, status: page.status },
+      revisions: revisions.map((revision) => ({
+        id: revision.id,
+        version: revision.version,
+        createdAt: revision.createdAt,
+        createdBy: revision.createdBy,
+        document: revision.document,
+      })),
+      events: events.map((event) => ({
+        id: event.id,
+        createdAt: event.createdAt,
+        actorId: event.actorId,
+        actorName: event.actorId ? actorById.get(event.actorId)?.name ?? null : null,
+        actorType: event.actorType,
+        actorKind: event.actorId ? actorById.get(event.actorId)?.kind ?? null : null,
+        action: event.action,
+        result: event.result,
+        resourcePath: event.resourcePath,
+        metadata: event.metadata,
+      })),
+    };
+  }
+
+  async restorePage(user: AuthUser, siteId: string, pageId: string, revisionId: string) {
+    const current = await this.mustPage(siteId, pageId);
+    await this.authorization.assert(user, siteId, 'pages.restore', { kind: 'page', folderId: current.folderId });
+    const [revision] = await this.database.db.select().from(pageRevisions).where(and(eq(pageRevisions.id, revisionId), eq(pageRevisions.pageId, pageId))).limit(1);
+    if (!revision) throw new ApiException(404, 'not_found', 'Revisão não encontrada.');
+    return this.updatePage(user, siteId, pageId, { document: revision.document, title: revision.document.metadata.title });
   }
 
   async rollbackPage(user: AuthUser, siteId: string, pageId: string, revisionId: string) {
@@ -378,19 +452,36 @@ export class ExperienceService {
   }
 
   async movePage(user: AuthUser, siteId: string, pageId: string, folderId: string | null) {
-    await this.access.requireSite(user.id, siteId, 'content:write');
     const current = await this.mustPage(siteId, pageId);
+    const site = await this.authorization.assert(user, siteId, 'pages.move', { kind: 'page', folderId: current.folderId });
+    await this.authorization.assert(user, siteId, 'pages.create', { kind: 'page', folderId });
     const path = await this.pathFor(siteId, folderId, current.slug);
     const [updated] = await this.database.db
       .update(pages)
       .set({ folderId, path, version: current.version + 1, updatedAt: new Date() })
       .where(eq(pages.id, pageId))
       .returning();
+    await this.access.audit(this.database.db, {
+      organizationId: site.organizationId,
+      siteId,
+      actorId: user.id,
+      actorType: this.actorType(user),
+      action: 'page.moved',
+      entityType: 'page',
+      entityId: pageId,
+      resourcePath: updated?.path,
+      metadata: { from: current.path, to: path },
+    });
     return updated;
+  }
+
+  private actorType(user: AuthUser): 'human' | 'service' {
+    return user.kind === 'service' ? 'service' : 'human';
   }
 
   async copyPage(user: AuthUser, siteId: string, pageId: string) {
     const current = await this.mustPage(siteId, pageId);
+    await this.authorization.assert(user, siteId, 'pages.copy', { kind: 'page', folderId: current.folderId });
     return this.createPage(user, siteId, {
       title: `${current.title} cópia`,
       slug: `${current.slug}-copia`,
@@ -402,8 +493,8 @@ export class ExperienceService {
   }
 
   async deletePage(user: AuthUser, siteId: string, pageId: string) {
-    await this.access.requireSite(user.id, siteId, 'content:write');
     const current = await this.mustPage(siteId, pageId);
+    await this.authorization.assert(user, siteId, 'pages.delete', { kind: 'page', folderId: current.folderId });
     const [updated] = await this.database.db
       .update(pages)
       .set({ deletedAt: new Date(), path: `${current.path}--deleted-${current.id}`, status: 'archived' })

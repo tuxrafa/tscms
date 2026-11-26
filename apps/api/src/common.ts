@@ -28,6 +28,8 @@ export function parseInput<T>(schema: ZodType<T>, value: unknown): T {
 export interface AuthUser {
   id: string;
   email: string;
+  kind?: 'human' | 'service';
+  sessionId?: string;
 }
 
 export const CurrentUser = createParamDecorator((_: unknown, context: ExecutionContext): AuthUser => {

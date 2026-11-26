@@ -23,10 +23,13 @@ export const registerSchema = z.object({
   organizationName: z.string().min(2).max(160),
 });
 
-export const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
+export const loginSchema = z
+  .object({
+    email: z.string().email().optional(),
+    login: z.string().min(2).max(80).optional(),
+    password: z.string().min(1),
+  })
+  .refine((value) => Boolean(value.email || value.login), { message: 'Informe o e-mail ou o identificador.' });
 
 export const workspaceSchema = z.object({ name: z.string().min(2).max(160) });
 

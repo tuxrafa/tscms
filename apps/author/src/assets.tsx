@@ -84,7 +84,11 @@ export function MediaPage({ siteId }: { siteId: string }) {
       body.append('file', file);
       const response = await fetch(`/v1/management/sites/${siteId}/media${folderId ? `?folderId=${folderId}` : ''}`, {
         method: 'POST',
-        headers: { authorization: `Bearer ${token}` },
+        headers: {
+          ...(token.includes('.') ? { authorization: `Bearer ${token}` } : {}),
+          'x-csrf-token': document.cookie.split('; ').find((part) => part.startsWith('tscms_csrf='))?.split('=').slice(1).join('=') ?? '',
+        },
+        credentials: 'include',
         body,
       });
       const payload = await response.json();

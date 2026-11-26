@@ -16,7 +16,8 @@ import {
 import { Button, Field, Panel, TextInput } from '@tscms/ui';
 import type { FieldDefinition } from '@tscms/content-schema';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link, Navigate, Route, Routes, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { AdminAudit, AdminGroups, AdminUsers, PageHistory } from './admin';
 import LinkExtension from '@tiptap/extension-link';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -59,17 +60,30 @@ export function App() {
 
 function LoginPage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
   const setToken = useSession((state) => state.setToken);
   const locale = useSession((state) => state.locale);
-  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const invite = params.get('invite');
+  const reset = params.get('reset');
+  const [mode, setMode] = useState<'login' | 'register'>(invite || reset ? 'login' : 'login');
   const [form, setForm] = useState({ name: '', email: '', password: '', organizationName: '' });
   const [error, setError] = useState('');
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError('');
     try {
-      const path = mode === 'login' ? '/v1/management/auth/login' : '/v1/management/auth/register';
-      const body = mode === 'login' ? { email: form.email, password: form.password } : form;
+      const path = invite
+        ? '/v1/management/auth/invitations/accept'
+        : reset
+          ? '/v1/management/auth/password/reset'
+          : mode === 'login'
+            ? '/v1/management/auth/login'
+            : '/v1/management/auth/register';
+      const body = invite || reset
+        ? { token: invite ?? reset, password: form.password }
+        : mode === 'login'
+          ? { email: form.email, password: form.password }
+          : form;
       const result = await api(path, { method: 'POST', body });
       setToken(result.token);
       navigate('/');
@@ -80,9 +94,9 @@ function LoginPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
       <p className="text-sm uppercase tracking-[0.2em] text-pine">TSCMS</p>
-      <h1 className="mb-6 text-5xl">{mode === 'login' ? t('login', locale) : t('register', locale)}</h1>
+      <h1 className="mb-6 text-5xl">{invite ? 'Definir senha' : reset ? 'Nova senha' : mode === 'login' ? t('login', locale) : t('register', locale)}</h1>
       <form className="flex flex-col gap-3" onSubmit={submit}>
-        {mode === 'register' ? (
+        {mode === 'register' && !invite && !reset ? (
           <>
             <Field label={t('name', locale)}>
               <TextInput value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required />
@@ -92,9 +106,11 @@ function LoginPage() {
             </Field>
           </>
         ) : null}
-        <Field label={t('email', locale)}>
-          <TextInput type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
-        </Field>
+        {invite || reset ? null : (
+          <Field label={t('email', locale)}>
+            <TextInput type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
+          </Field>
+        )}
         <Field label={t('password', locale)}>
           <TextInput type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
         </Field>
@@ -110,10 +126,14 @@ function LoginPage() {
 
 function Shell() {
   const locale = useSession((state) => state.locale);
+  const token = useSession((state) => state.token);
   const clear = useSession((state) => state.clear);
   const links = [
     ['/', t('studio', locale)],
     ['/sites', t('sites', locale)],
+    ['/admin/users', 'Usuários'],
+    ['/admin/groups', 'Grupos'],
+    ['/admin/audit', 'Auditoria'],
   ];
   return (
     <div className="min-h-screen md:grid md:grid-cols-[220px_1fr]">
@@ -126,7 +146,13 @@ function Shell() {
             </Link>
           ))}
         </nav>
-        <Button className="mt-8" variant="ghost" onClick={clear}>
+        <Button
+          className="mt-8"
+          variant="ghost"
+          onClick={() => {
+            void api('/v1/management/auth/logout', { method: 'POST', token }).finally(clear);
+          }}
+        >
           {t('logout', locale)}
         </Button>
       </aside>
@@ -134,10 +160,40 @@ function Shell() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/sites" element={<SitesPage />} />
+          <Route path="/admin/users" element={<AdminUsers />} />
+          <Route path="/admin/groups" element={<AdminGroups />} />
+          <Route path="/admin/audit" element={<AdminAudit />} />
           <Route path="/sites/:siteId/*" element={<SiteArea />} />
         </Routes>
       </div>
     </div>
+  );
+}
+
+function PasswordForm() {
+  const token = useSession((state) => state.token);
+  const [currentPassword, setCurrent] = useState('');
+  const [password, setPassword] = useState('');
+  const [message, setMessage] = useState('');
+  return (
+    <form
+      className="mt-4 flex max-w-sm flex-col gap-2"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void api('/v1/management/auth/password', { method: 'POST', token, body: { currentPassword, password } })
+          .then(() => setMessage('Senha alterada. As outras sessões foram encerradas.'))
+          .catch((error: unknown) => setMessage(error instanceof Error ? error.message : 'Falha'));
+      }}
+    >
+      <Field label="Senha atual">
+        <TextInput type="password" value={currentPassword} onChange={(event) => setCurrent(event.target.value)} required />
+      </Field>
+      <Field label="Nova senha">
+        <TextInput type="password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+      </Field>
+      <Button type="submit">Alterar senha</Button>
+      {message ? <p className="text-sm">{message}</p> : null}
+    </form>
   );
 }
 
@@ -151,6 +207,7 @@ function Dashboard() {
       <Panel title="Conta">
         <p>{me.data?.user?.name}</p>
         <p className="text-sm text-ink/60">{me.data?.user?.email}</p>
+        <PasswordForm />
       </Panel>
     </div>
   );
@@ -221,6 +278,7 @@ function SiteArea() {
       <Routes>
         <Route path="/" element={<SiteHome siteId={siteId!} />} />
         <Route path="/pages" element={<PagesConsole siteId={siteId!} />} />
+        <Route path="/pages/:pageId/history" element={<PageHistory siteId={siteId!} />} />
         <Route path="/pages/:pageId" element={<PageEditor siteId={siteId!} />} />
         <Route path="/content" element={<ContentDesk siteId={siteId!} />} />
         <Route path="/models" element={<ModelsPage siteId={siteId!} />} />
@@ -623,6 +681,7 @@ function PageEditor({ siteId }: { siteId: string }) {
           >
             {t('properties', locale)}
           </Button>
+          <Link className="rounded-full bg-white px-4 py-2 text-sm" to={`/sites/${siteId}/pages/${pageId}/history`}>Histórico</Link>
           <Button onClick={() => save.mutate()}>{t('save', locale)}</Button>
           <Button onClick={() => publish.mutate()}>{t('publish', locale)}</Button>
           <a

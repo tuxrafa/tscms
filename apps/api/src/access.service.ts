@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq, isNull } from 'drizzle-orm';
-import { auditEvents, memberships, sites, type Database } from '@tscms/database';
-import { roleAllows, type Permission } from '@tscms/core-domain';
+import { auditEvents, memberships, sites, users, type Database } from '@tscms/database';
+import { redactSecrets, roleAllows, type Permission } from '@tscms/core-domain';
 import { ApiException } from './common.js';
 import { DatabaseService } from './database.service.js';
 
@@ -17,6 +17,14 @@ export class AccessService {
   }
 
   async requireOrg(userId: string, organizationId: string, permission: Permission, siteId?: string) {
+    const [account] = await this.database.db
+      .select({ platformAdmin: users.platformAdmin, status: users.status })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    if (account?.platformAdmin && account.status === 'active') {
+      return { id: 'platform', organizationId, userId, role: 'owner', siteIds: null, createdAt: new Date() };
+    }
     const [membership] = await this.database.db
       .select()
       .from(memberships)
@@ -34,12 +42,16 @@ export class AccessService {
   async audit(
     db: Database,
     event: {
-      organizationId: string;
+      organizationId?: string | null;
       siteId?: string | null;
       actorId?: string | null;
+      actorType?: string;
       action: string;
+      result?: string;
       entityType: string;
       entityId: string;
+      resourcePath?: string | null;
+      requestId?: string | null;
       metadata?: Record<string, unknown>;
     },
   ) {
@@ -47,10 +59,14 @@ export class AccessService {
       organizationId: event.organizationId,
       siteId: event.siteId ?? null,
       actorId: event.actorId ?? null,
+      actorType: event.actorType ?? 'human',
       action: event.action,
+      result: event.result ?? 'success',
       entityType: event.entityType,
       entityId: event.entityId,
-      metadata: event.metadata ?? {},
+      resourcePath: event.resourcePath ?? null,
+      requestId: event.requestId ?? null,
+      metadata: redactSecrets(event.metadata ?? {}),
     });
   }
 }
