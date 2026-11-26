@@ -189,6 +189,8 @@ function renderBlock(
   data: Record<string, unknown>,
   context: RenderContext,
 ): string {
+  if (name === 'site-header') return renderSiteHeader(data);
+  if (name === 'site-footer') return renderSiteFooter(data);
   const classes = classNamesFor(name === 'faq' ? 'accordion' : name, variant, options);
   if (name === 'faq') classes[0] = 'faq';
   const rows = rowsFor(name, data, context, loadsEager(data, options));
@@ -471,4 +473,40 @@ function firstLink(value: unknown): string | undefined {
     }
   }
   return undefined;
+}
+
+function renderSiteHeader(data: Record<string, unknown>): string {
+  const items = arrayValue(data.items).map((item) => ({
+    label: stringValue(nested(item, 'label')),
+    href: stringValue(nested(item, 'href')),
+  }));
+  const cta = data.cta && typeof data.cta === 'object' ? data.cta : undefined;
+  const navLinks = items
+    .map((item) => `<a href="${escapeAttr(item.href)}">${escapeHtml(item.label)}</a>`)
+    .join('');
+  const ctaHtml = cta
+    ? `<a class="dp-btn dp-btn--gold dp-header__cta" href="${escapeAttr(stringValue(nested(cta, 'href')))}"><span class="material-symbols-outlined" aria-hidden="true">headphones</span>${escapeHtml(stringValue(nested(cta, 'label')))}</a>`
+    : '';
+  const searchPlaceholder = escapeAttr(stringValue(data.searchPlaceholder) || 'Buscar');
+  const menuLabel = escapeAttr(stringValue(data.menuLabel) || 'Abrir menu');
+  return `<header class="dp-header"><div class="dp-header__inner"><div class="dp-header__brand-wrap"><a class="dp-brand" href="${escapeAttr(stringValue(data.brandHref) || '/')}" aria-label="${escapeAttr(stringValue(data.brandName))} — início"><span class="dp-brand__mark" aria-hidden="true">${escapeHtml(stringValue(data.brandMark))}</span><span class="dp-brand__name">${escapeHtml(stringValue(data.brandName))}</span><span class="dp-brand__dot" aria-hidden="true"></span></a></div><nav class="dp-nav" aria-label="Principal">${navLinks}</nav><div class="dp-header__actions"><form class="dp-search" role="search" action="" method="get"><span class="material-symbols-outlined" aria-hidden="true">search</span><input type="search" name="q" placeholder="${searchPlaceholder}" aria-label="${searchPlaceholder}" disabled title="Busca em breve"></form>${ctaHtml}<button type="button" class="dp-nav-toggle" aria-label="${menuLabel}" aria-expanded="false" data-dp-nav-toggle><span class="material-symbols-outlined" aria-hidden="true">menu</span></button></div></div><nav class="dp-nav-mobile" aria-label="Mobile" hidden data-dp-nav-mobile>${navLinks}</nav></header>`;
+}
+
+function renderSiteFooter(data: Record<string, unknown>): string {
+  const chips = arrayValue(data.chips)
+    .map((chip) => `<span><span class="material-symbols-outlined" aria-hidden="true">${escapeHtml(stringValue(nested(chip, 'icon')))}</span> ${escapeHtml(stringValue(nested(chip, 'label')))}</span>`)
+    .join('');
+  const columns = arrayValue(data.columns)
+    .map((column) => {
+      const links = arrayValue(nested(column, 'links'))
+        .map((link) => `<li><a href="${escapeAttr(stringValue(nested(link, 'href')))}">${escapeHtml(stringValue(nested(link, 'label')))}</a></li>`)
+        .join('');
+      return `<div><h4>${escapeHtml(stringValue(nested(column, 'title')))}</h4><ul>${links}</ul></div>`;
+    })
+    .join('');
+  const legal = arrayValue(data.legalLinks)
+    .map((label) => `<span>${escapeHtml(stringValue(label))}</span>`)
+    .join('');
+  const year = new Date().getFullYear();
+  return `<footer class="dp-footer"><div class="dp-container dp-footer__grid"><div class="dp-footer__brand-col"><div class="dp-footer__brand"><span class="dp-brand__mark" aria-hidden="true">${escapeHtml(stringValue(data.brandMark))}</span><span class="dp-footer__title">${escapeHtml(stringValue(data.brandName))}</span></div><p>${escapeHtml(stringValue(data.description))}</p><div class="dp-footer__chips">${chips}</div></div>${columns}<div><h4>${escapeHtml(stringValue(data.newsletterLabel) || 'Newsletter')}</h4><p class="dp-footer__newsletter-copy">${escapeHtml(stringValue(data.newsletterCopy))}</p><button type="button" class="dp-btn dp-btn--gold" disabled>${escapeHtml(stringValue(data.newsletterLabel) || 'Newsletter')}</button></div></div><div class="dp-container dp-footer__legal"><p>© ${year} ${escapeHtml(stringValue(data.copyright))}</p><div class="dp-footer__legal-links">${legal}</div></div></footer>`;
 }

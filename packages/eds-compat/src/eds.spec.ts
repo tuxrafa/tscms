@@ -246,3 +246,70 @@ describe('header e footer do site', () => {
     expect(renderPlainMain(document, context)).not.toContain('Topo');
   });
 });
+
+describe('blocos de chrome do site', () => {
+  it('renderiza site-header e site-footer com o markup esperado pelo tema', () => {
+    const document = emptyDocument({ id: 'home', type: 'page', title: 'Home' });
+    document.slots.header = {
+      sections: [
+        {
+          id: 'h',
+          children: [
+            {
+              id: 'hb',
+              type: 'block',
+              name: 'site-header',
+              data: {
+                brandMark: '12',
+                brandName: 'Pontos',
+                brandHref: '/12pontos/',
+                items: [{ label: 'Início', href: '/12pontos/' }, { label: 'Notícias', href: '/12pontos/blog' }],
+                cta: { label: 'Ouvir o podcast', href: '/12pontos/blog' },
+              },
+            },
+          ],
+        },
+      ],
+    };
+    document.slots.footer = {
+      sections: [
+        {
+          id: 'f',
+          children: [
+            {
+              id: 'fb',
+              type: 'block',
+              name: 'site-footer',
+              data: {
+                brandMark: '12',
+                brandName: '12 Pontos',
+                description: 'Podcast.',
+                columns: [{ title: 'Navegação', links: [{ label: 'Início', href: '/12pontos/' }] }],
+                copyright: '12 Pontos. Todos os direitos reservados.',
+                legalLinks: ['Privacidade'],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const html = renderPageHtml(document, { ...context, basePath: '/12pontos' });
+    expect(html).toContain('<header><div><header class="dp-header">');
+    expect(html).toContain('<a class="dp-btn dp-btn--gold dp-header__cta" href="/12pontos/blog">');
+    expect(html).toContain('<nav class="dp-nav-mobile" aria-label="Mobile" hidden data-dp-nav-mobile>');
+    expect(html).toContain('<footer><div><footer class="dp-footer">');
+    expect(html).toContain('<h4>Navegação</h4><ul><li><a href="/12pontos/">Início</a></li></ul>');
+    expect(html).toContain('<span>Privacidade</span>');
+  });
+
+  it('escapa dados de chrome', () => {
+    const document = emptyDocument({ id: 'x', type: 'page', title: 'X' });
+    document.slots.footer = {
+      sections: [{ id: 'f', children: [{ id: 'fb', type: 'block', name: 'site-footer', data: { brandName: '<b>x</b>', columns: [] } }] }],
+    };
+    const html = renderPlainMain(document, context);
+    expect(html).not.toContain('<b>');
+    expect(renderPageHtml(document, context)).toContain('&lt;b&gt;x&lt;/b&gt;');
+  });
+});
+
