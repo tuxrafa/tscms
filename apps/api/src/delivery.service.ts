@@ -187,6 +187,25 @@ export class DeliveryService {
     return { data };
   }
 
+  async publishedFragments(siteKey: string, slug?: string) {
+    const site = await this.mustSite(siteKey);
+    const [content, experience] = await Promise.all([
+      this.database.db
+        .select({ id: contentFragments.id, slug: contentFragments.slug, title: contentFragments.title, locale: contentFragments.locale, publishedRevisionId: contentFragments.publishedRevisionId })
+        .from(contentFragments)
+        .where(and(eq(contentFragments.siteId, site.id), eq(contentFragments.status, 'published'), isNull(contentFragments.deletedAt))),
+      this.database.db
+        .select({ id: experienceFragments.id, slug: experienceFragments.slug, title: experienceFragments.title, locale: experienceFragments.locale, path: experienceFragments.path, publishedRevisionId: experienceFragments.publishedRevisionId })
+        .from(experienceFragments)
+        .where(and(eq(experienceFragments.siteId, site.id), eq(experienceFragments.status, 'published'), isNull(experienceFragments.deletedAt))),
+    ]);
+    const data = [
+      ...content.map((row) => ({ id: row.id, kind: 'content' as const, slug: row.slug, title: row.title, locale: row.locale, published: Boolean(row.publishedRevisionId) })),
+      ...experience.map((row) => ({ id: row.id, kind: 'experience' as const, slug: row.slug, title: row.title, locale: row.locale, path: row.path, published: Boolean(row.publishedRevisionId) })),
+    ].filter((row) => row.published && (slug === undefined || row.slug === slug));
+    return { data: data.map(({ published: _published, ...row }) => row) };
+  }
+
   async fragment(siteKey: string, id: string, format: 'json' | 'html' = 'json') {
     const site = await this.mustSite(siteKey);
     const [fragment] = await this.database.db

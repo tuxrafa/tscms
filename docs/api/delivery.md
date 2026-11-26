@@ -5,6 +5,7 @@ Base: `/v1/delivery`. Leitura do que está publicado.
 - `GET /sites/{siteKey}/pages/by-path?path=/&format=json|html|plain`
 - `GET /sites/{siteKey}/content/{id}`
 - `GET /sites/{siteKey}/collections/{name}`
+- `GET /sites/{siteKey}/fragments?slug=` (lista fragmentos publicados; `slug` filtra)
 - `GET /sites/{siteKey}/fragments/{id}?format=json|html`
 - `GET /sites/{siteKey}/search?q=`
 - `GET /sites/{siteKey}/feed.xml`
