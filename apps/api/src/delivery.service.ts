@@ -20,7 +20,7 @@ import {
 import { applySiteChrome, compose, type SiteChrome } from '@tscms/content-composer';
 import type { CanonicalDocument } from '@tscms/content-schema';
 import type { FragmentLookup } from '@tscms/fragment-resolver';
-import { renderPageHtml, renderPlainMain } from '@tscms/eds-compat';
+import { renderFragmentHtml, renderPageHtml, renderPlainMain } from '@tscms/eds-compat';
 import { renderRobots, renderRss, renderSitemap, writePublishedFiles, type FeedItem } from '@tscms/publishing';
 import { createHash } from 'node:crypto';
 import { ApiException } from './common.js';
@@ -187,7 +187,7 @@ export class DeliveryService {
     return { data };
   }
 
-  async fragment(siteKey: string, id: string) {
+  async fragment(siteKey: string, id: string, format: 'json' | 'html' = 'json') {
     const site = await this.mustSite(siteKey);
     const [fragment] = await this.database.db
       .select()
@@ -205,7 +205,14 @@ export class DeliveryService {
       .limit(1);
     if (!experience?.publishedRevisionId) throw new ApiException(404, 'not_found', 'Fragmento publicado não encontrado.');
     const [revision] = await this.database.db.select().from(experienceFragmentRevisions).where(eq(experienceFragmentRevisions.id, experience.publishedRevisionId)).limit(1);
-    return { id: experience.id, kind: 'experience', locale: experience.locale, path: experience.path, revisionId: revision?.id, document: revision?.document };
+    const base = { id: experience.id, kind: 'experience', locale: experience.locale, path: experience.path, revisionId: revision?.id, document: revision?.document };
+    if (format !== 'html' || !revision) return base;
+    const composed = this.composePage(site.id, await this.hydrateAssets(site.key, revision.document), undefined);
+    if (composed.issues.length > 0) {
+      throw new ApiException(409, 'composition', 'O fragmento publicado não pôde ser composto.', composed.issues.map((message) => ({ path: 'document', message })));
+    }
+    const html = renderFragmentHtml(composed.document, this.renderContext(site.key, (site.config ?? {}) as Record<string, unknown>));
+    return { ...base, document: composed.document, html, etag: this.etag(html) };
   }
 
   async search(siteKey: string, q: string, locale?: string) {

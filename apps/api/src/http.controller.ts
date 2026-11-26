@@ -549,8 +549,8 @@ export class DeliveryController {
 
   @Public()
   @Get('sites/:siteKey/fragments/:id')
-  fragment(@Param('siteKey') siteKey: string, @Param('id') id: string) {
-    return this.delivery.fragment(siteKey, id);
+  fragment(@Param('siteKey') siteKey: string, @Param('id') id: string, @Query('format') format?: string) {
+    return this.delivery.fragment(siteKey, id, format === 'html' ? 'html' : 'json');
   }
 
   @Public()

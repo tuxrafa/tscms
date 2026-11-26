@@ -2,7 +2,7 @@ import { parseHTML } from 'linkedom';
 import { describe, expect, it } from 'vitest';
 import { emptyDocument } from '@tscms/content-schema';
 import { decorateMain, loadPage } from '@tscms/eds-runtime';
-import { applyAutoBlocks, renderPageHtml, renderPlainMain } from './index.js';
+import { applyAutoBlocks, renderFragmentHtml, renderPageHtml, renderPlainMain } from './index.js';
 
 const context = { siteKey: 'revista', publicBaseUrl: 'http://127.0.0.1:3000', runtime: 'tscms' as const };
 
@@ -294,12 +294,26 @@ describe('blocos de chrome do site', () => {
       ],
     };
     const html = renderPageHtml(document, { ...context, basePath: '/12pontos' });
-    expect(html).toContain('<header><div><header class="dp-header">');
+    expect(html).toContain('<header class="dp-header">');
     expect(html).toContain('<a class="dp-btn dp-btn--gold dp-header__cta" href="/12pontos/blog">');
     expect(html).toContain('<nav class="dp-nav-mobile" aria-label="Mobile" hidden data-dp-nav-mobile>');
-    expect(html).toContain('<footer><div><footer class="dp-footer">');
+    expect(html).toContain('<footer class="dp-footer">');
     expect(html).toContain('<h4>Navegação</h4><ul><li><a href="/12pontos/">Início</a></li></ul>');
     expect(html).toContain('<span>Privacidade</span>');
+    expect(html).not.toContain('<header><header');
+    expect(html).not.toContain('<footer><footer');
+    expect(html).toContain('action=""');
+  });
+
+  it('renderiza o fragmento de chrome sem wrappers e mantém o botão da newsletter', () => {
+    const document = emptyDocument({ id: 'h', type: 'experienceFragment', title: 'Rodapé' });
+    document.slots.main = {
+      sections: [{ id: 'f', children: [{ id: 'fb', type: 'block', name: 'site-footer', data: { brandName: 'X', columns: [], newsletterLabel: 'Newsletter', newsletterButton: 'Em breve' } }] }],
+    };
+    const html = renderFragmentHtml(document, context);
+    expect(html.startsWith('<footer class="dp-footer">')).toBe(true);
+    expect(html).toContain('<h4>Newsletter</h4>');
+    expect(html).toContain('disabled>Em breve</button>');
   });
 
   it('escapa dados de chrome', () => {

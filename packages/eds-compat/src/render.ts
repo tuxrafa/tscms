@@ -40,6 +40,14 @@ export function renderPlainMain(document: CanonicalDocument, context: RenderCont
   return html.includes('asset-picture') ? `${assetPictureStyle}${html}` : html;
 }
 
+function wrapChrome(tag: 'header' | 'footer', inner: string): string {
+  return inner.startsWith(`<${tag}`) ? inner : `<${tag}>${inner}</${tag}>`;
+}
+
+export function renderFragmentHtml(document: CanonicalDocument, context: RenderContext): string {
+  return renderSlots(document, context, () => true);
+}
+
 function renderSlots(document: CanonicalDocument, context: RenderContext, include: (name: string) => boolean): string {
   return Object.entries(document.slots)
     .filter(([name]) => include(name))
@@ -72,7 +80,7 @@ export function renderPageHtml(document: CanonicalDocument, context: RenderConte
       ? `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/aem.js'))}" type="module"></script><script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`
       : `<script src="${escapeAttr(withBasePath(context.basePath, '/scripts/scripts.js'))}" type="module"></script>`;
   const lcpPreload = portalPerformanceDefaults.images.prioritizeLcp ? lcpPreloadLink(document) : '';
-  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="${escapeAttr(feedHref)}">${lcpPreload}<link rel="stylesheet" href="${escapeAttr(stylesHref)}">${structured}${scripts}</head><body><header>${renderSlots(document, context, (name) => name === 'header')}</header><main>${renderPlainMain(document, context)}</main><footer>${renderSlots(document, context, (name) => name === 'footer')}</footer></body></html>`;
+  return `<!DOCTYPE html><html lang="${escapeAttr(language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>${description}${canonical}${robots}<meta property="og:title" content="${ogTitle}">${ogDescription ? `<meta property="og:description" content="${escapeAttr(ogDescription)}">` : ''}${ogImage}<meta property="og:type" content="website"><meta name="nav" content="${escapeAttr(nav)}"><meta name="footer" content="${escapeAttr(footer)}">${meta.template ? `<meta name="template" content="${escapeAttr(meta.template)}">` : ''}${meta.theme ? `<meta name="theme" content="${escapeAttr(meta.theme)}">` : ''}${alternates}<link rel="alternate" type="application/rss+xml" title="${title}" href="${escapeAttr(feedHref)}">${lcpPreload}<link rel="stylesheet" href="${escapeAttr(stylesHref)}">${structured}${scripts}</head><body>${wrapChrome('header', renderSlots(document, context, (name) => name === 'header'))}<main>${renderPlainMain(document, context)}</main>${wrapChrome('footer', renderSlots(document, context, (name) => name === 'footer'))}</body></html>`;
 }
 
 /** Early LCP discovery: preload the first eager image before render-blocking CSS. */
@@ -133,7 +141,12 @@ function renderSection(section: SectionNode, context: RenderContext): string {
   const id = section.metadata?.anchorId ? ` id="${escapeAttr(sanitizeAnchor(section.metadata.anchorId))}"` : '';
   const classAttr = classes.length > 0 ? ` class="${classes.join(' ')}"` : '';
   const children = section.children.map((node) => renderNode(node, context)).join('');
+  if (section.children.length > 0 && section.children.every(isSiteChromeBlock)) return children;
   return `<div${classAttr}${id}>${children}</div>`;
+}
+
+function isSiteChromeBlock(node: ContentNode): boolean {
+  return node.type === 'block' && (node.name === 'site-header' || node.name === 'site-footer');
 }
 
 function renderNode(node: ContentNode, context: RenderContext): string {
@@ -489,7 +502,7 @@ function renderSiteHeader(data: Record<string, unknown>): string {
     : '';
   const searchPlaceholder = escapeAttr(stringValue(data.searchPlaceholder) || 'Buscar');
   const menuLabel = escapeAttr(stringValue(data.menuLabel) || 'Abrir menu');
-  return `<header class="dp-header"><div class="dp-header__inner"><div class="dp-header__brand-wrap"><a class="dp-brand" href="${escapeAttr(stringValue(data.brandHref) || '/')}" aria-label="${escapeAttr(stringValue(data.brandName))} — início"><span class="dp-brand__mark" aria-hidden="true">${escapeHtml(stringValue(data.brandMark))}</span><span class="dp-brand__name">${escapeHtml(stringValue(data.brandName))}</span><span class="dp-brand__dot" aria-hidden="true"></span></a></div><nav class="dp-nav" aria-label="Principal">${navLinks}</nav><div class="dp-header__actions"><form class="dp-search" role="search" action="" method="get"><span class="material-symbols-outlined" aria-hidden="true">search</span><input type="search" name="q" placeholder="${searchPlaceholder}" aria-label="${searchPlaceholder}" disabled title="Busca em breve"></form>${ctaHtml}<button type="button" class="dp-nav-toggle" aria-label="${menuLabel}" aria-expanded="false" data-dp-nav-toggle><span class="material-symbols-outlined" aria-hidden="true">menu</span></button></div></div><nav class="dp-nav-mobile" aria-label="Mobile" hidden data-dp-nav-mobile>${navLinks}</nav></header>`;
+  return `<header class="dp-header"><div class="dp-header__inner"><div class="dp-header__brand-wrap"><a class="dp-brand" href="${escapeAttr(stringValue(data.brandHref) || '/')}" aria-label="${escapeAttr(stringValue(data.brandName))} — início"><span class="dp-brand__mark" aria-hidden="true">${escapeHtml(stringValue(data.brandMark))}</span><span class="dp-brand__name">${escapeHtml(stringValue(data.brandName))}</span><span class="dp-brand__dot" aria-hidden="true"></span></a></div><nav class="dp-nav" aria-label="Principal">${navLinks}</nav><div class="dp-header__actions"><form class="dp-search" role="search" action="${escapeAttr(stringValue(data.searchAction))}" method="get"><span class="material-symbols-outlined" aria-hidden="true">search</span><input type="search" name="q" placeholder="${searchPlaceholder}" aria-label="${searchPlaceholder}" disabled title="Busca em breve"></form>${ctaHtml}<button type="button" class="dp-nav-toggle" aria-label="${menuLabel}" aria-expanded="false" data-dp-nav-toggle><span class="material-symbols-outlined" aria-hidden="true">menu</span></button></div></div><nav class="dp-nav-mobile" aria-label="Mobile" hidden data-dp-nav-mobile>${navLinks}</nav></header>`;
 }
 
 function renderSiteFooter(data: Record<string, unknown>): string {
@@ -508,5 +521,5 @@ function renderSiteFooter(data: Record<string, unknown>): string {
     .map((label) => `<span>${escapeHtml(stringValue(label))}</span>`)
     .join('');
   const year = new Date().getFullYear();
-  return `<footer class="dp-footer"><div class="dp-container dp-footer__grid"><div class="dp-footer__brand-col"><div class="dp-footer__brand"><span class="dp-brand__mark" aria-hidden="true">${escapeHtml(stringValue(data.brandMark))}</span><span class="dp-footer__title">${escapeHtml(stringValue(data.brandName))}</span></div><p>${escapeHtml(stringValue(data.description))}</p><div class="dp-footer__chips">${chips}</div></div>${columns}<div><h4>${escapeHtml(stringValue(data.newsletterLabel) || 'Newsletter')}</h4><p class="dp-footer__newsletter-copy">${escapeHtml(stringValue(data.newsletterCopy))}</p><button type="button" class="dp-btn dp-btn--gold" disabled>${escapeHtml(stringValue(data.newsletterLabel) || 'Newsletter')}</button></div></div><div class="dp-container dp-footer__legal"><p>© ${year} ${escapeHtml(stringValue(data.copyright))}</p><div class="dp-footer__legal-links">${legal}</div></div></footer>`;
+  return `<footer class="dp-footer"><div class="dp-container dp-footer__grid"><div class="dp-footer__brand-col"><div class="dp-footer__brand"><span class="dp-brand__mark" aria-hidden="true">${escapeHtml(stringValue(data.brandMark))}</span><span class="dp-footer__title">${escapeHtml(stringValue(data.brandName))}</span></div><p>${escapeHtml(stringValue(data.description))}</p><div class="dp-footer__chips">${chips}</div></div>${columns}<div><h4>${escapeHtml(stringValue(data.newsletterLabel) || 'Newsletter')}</h4><p class="dp-footer__newsletter-copy">${escapeHtml(stringValue(data.newsletterCopy))}</p><button type="button" class="dp-btn dp-btn--gold" disabled>${escapeHtml(stringValue(data.newsletterButton) || stringValue(data.newsletterLabel) || 'Newsletter')}</button></div></div><div class="dp-container dp-footer__legal"><p>© ${year} ${escapeHtml(stringValue(data.copyright))}</p><div class="dp-footer__legal-links">${legal}</div></div></footer>`;
 }
