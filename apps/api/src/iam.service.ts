@@ -60,6 +60,7 @@ const inviteSchema = z.object({
   name: z.string().min(1).max(160),
   groupIds: z.array(z.string().uuid()).optional(),
   grant: grantSchema.optional(),
+  grants: z.array(grantSchema).min(1).max(40).optional(),
 });
 
 const groupSchema = z.object({
@@ -159,9 +160,10 @@ export class IamService {
 
   async invite(actor: AuthUser, input: unknown) {
     const body = parseInput(inviteSchema, input);
-    if (!body.groupIds?.length && !body.grant) throw new ApiException(400, 'validation_error', 'Informe um grupo ou um escopo.');
+    const grants = [...(body.grants ?? []), ...(body.grant ? [body.grant] : [])];
+    if (!body.groupIds?.length && grants.length === 0) throw new ApiException(400, 'validation_error', 'Informe um grupo ou um escopo.');
     const ctx = await this.actorContext(actor.id, body.organizationId);
-    if (body.grant) await this.assertGrantAllowed(ctx, body.grant);
+    for (const grant of grants) await this.assertGrantAllowed(ctx, grant);
     if (body.groupIds) {
       for (const roleId of body.groupIds) await this.assertCanAssign(ctx, roleId);
     }
@@ -196,7 +198,7 @@ export class IamService {
     if (body.groupIds) {
       for (const roleId of body.groupIds) await this.addGroupMember(ctx, roleId, account.id);
     }
-    if (body.grant) await this.insertGrant(ctx, body.organizationId, account.id, null, body.grant);
+    for (const grant of grants) await this.insertGrant(ctx, body.organizationId, account.id, null, grant);
     await this.access.audit(this.database.db, {
       organizationId: body.organizationId,
       actorId: actor.id,

@@ -36,14 +36,105 @@ interface AuditRow {
 
 const pagePermissions = [
   ['pages.read', 'Ler'],
+  ['pages.edit', 'Modificar'],
   ['pages.create', 'Criar'],
-  ['pages.edit', 'Editar'],
+  ['pages.delete', 'Excluir'],
   ['pages.publish', 'Publicar'],
   ['pages.unpublish', 'Despublicar'],
-  ['pages.delete', 'Excluir'],
   ['users.invite', 'Convidar'],
   ['audit.read', 'Ver auditoria'],
-];
+] as const;
+
+const pathPermissions = pagePermissions.filter(([code]) => code.startsWith('pages.'));
+
+interface FolderOption {
+  id: string;
+  name: string;
+  path: string;
+}
+
+function FolderIcon() {
+  return (
+    <svg aria-hidden="true" className="h-4 w-4 shrink-0 text-pine" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3.2l1.2 1.4H13A1.5 1.5 0 0 1 14.5 4.9v7.1A1.5 1.5 0 0 1 13 13.5H3A1.5 1.5 0 0 1 1.5 12V3.5Z" />
+    </svg>
+  );
+}
+
+function PermissionGrid({
+  siteName,
+  folders,
+  checks,
+  onToggle,
+}: {
+  siteName: string;
+  folders: FolderOption[];
+  checks: Record<string, string[]>;
+  onToggle: (scopeKey: string, permission: string) => void;
+}) {
+  const [filter, setFilter] = useState('');
+  const query = filter.trim().toLowerCase();
+  const rows = [
+    { key: 'site', name: siteName || 'Site', path: '/', depth: 0 },
+    ...folders
+      .slice()
+      .sort((left, right) => left.path.localeCompare(right.path, 'pt-BR'))
+      .map((folder) => ({
+        key: folder.id,
+        name: folder.name,
+        path: folder.path,
+        depth: Math.max(folder.path.split('/').filter(Boolean).length - 1, 0),
+      })),
+  ].filter((row) => !query || row.name.toLowerCase().includes(query) || row.path.toLowerCase().includes(query));
+  return (
+    <div className="flex flex-col gap-2">
+      <TextInput value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Filtrar caminho" aria-label="Filtrar caminho" />
+      <div className="overflow-auto rounded-2xl border border-line">
+        <table className="w-full min-w-[40rem] border-collapse text-left text-sm">
+          <thead className="bg-paper">
+            <tr>
+              <th className="px-3 py-2 font-medium">Caminho</th>
+              {pathPermissions.map(([code, label]) => (
+                <th key={code} className="px-2 py-2 text-center font-medium">{label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.key} className="border-t border-line">
+                <td className="px-3 py-2" style={{ paddingLeft: `${12 + row.depth * 16}px` }}>
+                  <span className="inline-flex items-center gap-2" title={row.path}>
+                    <FolderIcon />
+                    <span>{row.name}</span>
+                    <span className="text-ink/45">{row.path}</span>
+                  </span>
+                </td>
+                {pathPermissions.map(([code, label]) => {
+                  const checked = (checks[row.key] ?? []).includes(code);
+                  return (
+                    <td key={code} className="px-2 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        aria-label={`${row.path} ${label}`}
+                        checked={checked}
+                        onChange={() => onToggle(row.key, code)}
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+            {rows.length === 0 ? (
+              <tr>
+                <td className="px-3 py-3 text-ink/60" colSpan={pathPermissions.length + 1}>Nenhuma pasta com esse nome.</td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 function useOrg() {
   const token = useSession((state) => state.token);
@@ -62,30 +153,42 @@ export function AdminUsers() {
     enabled: Boolean(organizationId),
     queryFn: () => api(`/v1/management/organizations/${organizationId}/users`, { token }) as Promise<{ data: OrgUser[] }>,
   });
-  const [form, setForm] = useState({ name: '', email: '', folderId: '', permissions: 'pages.read,pages.create,pages.edit' });
+  const [form, setForm] = useState({ name: '', email: '' });
+  const [checks, setChecks] = useState<Record<string, string[]>>({ site: ['pages.read', 'pages.create', 'pages.edit'] });
   const [invite, setInvite] = useState('');
   const [error, setError] = useState('');
   const sites = useQuery({ queryKey: ['sites'], queryFn: () => api('/v1/management/sites', { token }) as Promise<{ data: { id: string; name: string }[] }> });
-  const siteId = sites.data?.data[0]?.id;
+  const [siteId, setSiteId] = useState('');
+  const selectedSiteId = siteId || sites.data?.data[0]?.id || '';
+  const selectedSite = sites.data?.data.find((site) => site.id === selectedSiteId);
+  const folders = useQuery({
+    queryKey: ['folders', selectedSiteId],
+    enabled: Boolean(selectedSiteId),
+    queryFn: () => api(`/v1/management/sites/${selectedSiteId}/folders`, { token }) as Promise<{ data: FolderOption[] }>,
+  });
   const create = useMutation({
-    mutationFn: () =>
-      api(`/v1/management/organizations/${organizationId}/users`, {
+    mutationFn: () => {
+      const folderRows = folders.data?.data ?? [];
+      const grants = [
+        { key: 'site', scopeType: 'site' as const, scopeId: null },
+        ...folderRows.map((folder) => ({ key: folder.id, scopeType: 'page_folder' as const, scopeId: folder.id })),
+      ]
+        .map((row) => ({ ...row, permissions: checks[row.key] ?? [] }))
+        .filter((row) => row.permissions.length > 0)
+        .map((row) => ({
+          siteId: selectedSiteId,
+          scopeType: row.scopeType,
+          scopeId: row.scopeId,
+          includeDescendants: true,
+          permissions: row.permissions,
+        }));
+      if (!selectedSiteId || grants.length === 0) throw new Error('Marque ao menos uma permissão no grid.');
+      return api(`/v1/management/organizations/${organizationId}/users`, {
         method: 'POST',
         token,
-        body: {
-          name: form.name,
-          email: form.email,
-          grant: siteId
-            ? {
-                siteId,
-                scopeType: form.folderId ? 'page_folder' : 'site',
-                scopeId: form.folderId || null,
-                includeDescendants: true,
-                permissions: form.permissions.split(',').map((item) => item.trim()).filter(Boolean),
-              }
-            : undefined,
-        },
-      }),
+        body: { name: form.name, email: form.email, grants },
+      });
+    },
     onSuccess: (result) => {
       setInvite(result.inviteToken ? `${window.location.origin}/tscms/login?invite=${result.inviteToken}` : 'Usuário associado.');
       setError('');
@@ -105,9 +208,24 @@ export function AdminUsers() {
         >
           <Field label="Nome"><TextInput value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></Field>
           <Field label="E-mail"><TextInput type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required /></Field>
-          <Field label="Pasta (opcional)"><TextInput value={form.folderId} onChange={(event) => setForm({ ...form, folderId: event.target.value })} /></Field>
-          <Field label="Permissões"><TextInput value={form.permissions} onChange={(event) => setForm({ ...form, permissions: event.target.value })} /></Field>
-          <Button type="submit">Convidar</Button>
+          {(sites.data?.data.length ?? 0) > 1 ? (
+            <Field label="Site">
+              <select className="rounded-xl border border-line bg-white px-3 py-2" value={selectedSiteId} onChange={(event) => setSiteId(event.target.value)}>
+                {(sites.data?.data ?? []).map((site) => <option key={site.id} value={site.id}>{site.name}</option>)}
+              </select>
+            </Field>
+          ) : null}
+          <PermissionGrid
+            siteName={selectedSite?.name ?? 'Site'}
+            folders={folders.data?.data ?? []}
+            checks={checks}
+            onToggle={(scopeKey, permission) => setChecks((current) => {
+              const list = current[scopeKey] ?? [];
+              const next = list.includes(permission) ? list.filter((item) => item !== permission) : [...list, permission];
+              return { ...current, [scopeKey]: next };
+            })}
+          />
+          <Button type="submit" disabled={create.isPending}>Convidar</Button>
         </form>
         {invite ? <p className="mt-2 break-all text-sm">{invite}</p> : null}
         {error ? <p className="text-sm text-clay">{error}</p> : null}
