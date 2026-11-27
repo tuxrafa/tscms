@@ -68,6 +68,18 @@ describe('identidade, escopo e auditoria', () => {
     siteId = site.json().id;
     newsId = (await asAdmin('POST', `/v1/management/sites/${siteId}/folders`, { name: 'Notícias' })).json().id;
     podcastsId = (await asAdmin('POST', `/v1/management/sites/${siteId}/folders`, { name: 'Podcasts' })).json().id;
+    const gridInvite = await asAdmin('POST', `/v1/management/organizations/${organizationId}/users`, {
+      name: 'Grade',
+      email: 'grade@example.com',
+      grants: [
+        { siteId, scopeType: 'page_folder', scopeId: newsId, includeDescendants: true, permissions: ['pages.read', 'pages.create'] },
+        { siteId, scopeType: 'page_folder', scopeId: podcastsId, includeDescendants: true, permissions: ['pages.read'] },
+      ],
+    });
+    expect(gridInvite.statusCode).toBe(201);
+    const gridToken = (await call('POST', '/v1/management/auth/invitations/accept', { token: gridInvite.json().inviteToken, password: 'frase-longa-grade' })).json().token;
+    expect((await asUser(gridToken, 'POST', `/v1/management/sites/${siteId}/pages`, { title: 'Na grade', folderId: newsId })).statusCode).toBe(201);
+    expect((await asUser(gridToken, 'POST', `/v1/management/sites/${siteId}/pages`, { title: 'Só leitura', folderId: podcastsId })).statusCode).toBe(403);
     const eurovisionId = (await asAdmin('POST', `/v1/management/sites/${siteId}/folders`, { name: 'Eurovision', parentId: newsId })).json().id;
 
     const authors = await asAdmin('POST', `/v1/management/organizations/${organizationId}/groups`, {
