@@ -24,6 +24,7 @@ export const pageMetadataSchema = z.object({
   footer: z.string().optional(),
   template: z.string().optional(),
   theme: z.string().optional(),
+  tags: z.array(z.string().trim().min(1).max(60)).max(20).optional(),
 });
 
 export type PageMetadata = z.infer<typeof pageMetadataSchema>;

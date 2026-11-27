@@ -198,7 +198,7 @@ describe('fluxo editorial de ponta a ponta', () => {
         type: 'page',
         locale: 'pt-BR',
         templateId: articleTemplate.id,
-        metadata: { title: 'Capa da revista', description: 'Edição de demonstração', language: 'pt-BR' },
+        metadata: { title: 'Capa da revista', description: 'Edição de demonstração', language: 'pt-BR', tags: ['Notícias'] },
         slots: {
           main: {
             sections: [
@@ -388,7 +388,7 @@ describe('fluxo editorial de ponta a ponta', () => {
     expect(html.body).not.toContain('data-reactroot');
     const publishedPages = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages` });
     expect(publishedPages.statusCode).toBe(200);
-    expect(publishedPages.json().data.some((item: { path: string }) => item.path === '/capa')).toBe(true);
+    expect(publishedPages.json().data.some((item: { path: string; tags?: string[] }) => item.path === '/capa' && item.tags?.includes('Notícias'))).toBe(true);
     expect((await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages?pathPrefix=/blog/` })).json().data.some((item: { path: string }) => item.path === '/capa')).toBe(false);
     expect((await inject('POST', `/v1/management/sites/${siteId}/pages/${pageId}/unpublish`)).statusCode).toBe(201);
     const afterUnpublish = await app.inject({ method: 'GET', url: `/v1/delivery/sites/${siteKey}/pages` });

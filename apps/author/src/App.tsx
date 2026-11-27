@@ -477,8 +477,15 @@ function composePath(folderPath: string | null, slug: string): string {
   return `${folderPath.replace(/\/$/, '')}/${slug}`;
 }
 
+function parseTags(value: string): string[] {
+  return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))].slice(0, 20);
+}
+
 function metadataForSave(metadata: PageMetadata): PageMetadata {
   const next: PageMetadata = { ...metadata, title: metadata.title.trim() };
+  const tags = parseTags((next.tags ?? []).join(','));
+  if (tags.length > 0) next.tags = tags;
+  else delete next.tags;
   for (const key of ['description', 'canonical', 'robots', 'language', 'nav', 'footer', 'template', 'theme'] as const) {
     const value = next[key]?.trim();
     if (!value) delete next[key];
@@ -564,6 +571,7 @@ function PageSettings({
           ))}
         </select>
       </Field>
+      <TagsField tags={metadata.tags} onChange={(tags) => setMetadata({ tags })} label={t('tags', locale)} hint={t('tagsHint', locale)} />
       <h3 className="mt-2 font-serif text-lg">{t('metadata', locale)}</h3>
       <Field label={t('description', locale)}>
         <TextInput className="w-full" value={metadata.description ?? ''} onChange={(event) => setMetadata({ description: event.target.value })} />
@@ -596,6 +604,23 @@ function PageSettings({
         <TextInput className="w-full" value={metadata.openGraph?.image ?? ''} onChange={(event) => setOpenGraph('image', event.target.value)} />
       </Field>
     </div>
+  );
+}
+
+function TagsField({ tags, onChange, label, hint }: { tags: string[] | undefined; onChange: (tags: string[]) => void; label: string; hint: string }) {
+  const [raw, setRaw] = useState((tags ?? []).join(', '));
+  return (
+    <Field label={label}>
+      <TextInput
+        className="w-full"
+        value={raw}
+        onChange={(event) => {
+          setRaw(event.target.value);
+          onChange(parseTags(event.target.value));
+        }}
+      />
+      <span className="text-xs text-ink/60">{hint}</span>
+    </Field>
   );
 }
 

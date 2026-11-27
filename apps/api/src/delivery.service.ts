@@ -94,6 +94,7 @@ export class DeliveryService {
         locale: row.locale,
         description: row.document.metadata.description ?? row.document.metadata.openGraph?.description ?? '',
         image: row.document.metadata.openGraph?.image ?? '',
+        tags: row.document.metadata.tags ?? [],
         updatedAt: row.updatedAt.toISOString(),
       })),
     };
